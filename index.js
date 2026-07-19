@@ -1,18 +1,16 @@
-// 🟢 Renderのスリープを防ぐためのWebサーバー設定（ポート10000番で待機）
+// Renderのスリープを防ぐためのWebサーバー設定
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
+app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
 app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const Database = require('better-sqlite3');
 require('dotenv').config();
 
-// データベースファイルの作成・接続
 const db = new Database('database.db');
 
-// テーブルがなければ作成する (ユーザーID、サーバーID、発言数)
 db.prepare(`
     CREATE TABLE IF NOT EXISTS message_counts (
         user_id TEXT,
@@ -27,26 +25,25 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers // サーバーメンバー情報を読み込むための権限
+        GatewayIntentBits.GuildMembers
     ]
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-// スラッシュコマンド（/count と /ranking）の定義
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
         .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングTOP10を表示します')
+        .setDescription('このサーバーの発言数ランキングを表示します')
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// 過去のメッセージをすべて遡ってカウントし、データベースに保存する関数
+// 過去のメッセージを一括スキャンする関数
 async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
@@ -88,13 +85,11 @@ async function fetchAllMessages(guild) {
 
 client.once('ready', async () => {
     console.log(`${client.user.tag} が起動しました！`);
-    
     try {
         console.log('スラッシュコマンドを登録中...');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
 
-        // 初回起動時のみ、過去の全ログをスキャンしてデータベースへ移行
         const rowCount = db.prepare("SELECT COUNT(*) as count FROM message_counts").get();
         if (rowCount.count === 0) {
             for (const [_, guild] of client.guilds.cache) {
@@ -103,16 +98,13 @@ client.once('ready', async () => {
         } else {
             console.log("すでにデータが保存されているため、過去スキャンをスキップしました（通常起動）");
         }
-
     } catch (error) {
         console.error(error);
     }
 });
 
-// 通常のリアルタイム発言をデータベースに保存する処理
 client.on('messageCreate', (message) => {
     if (message.author.bot || !message.guild) return;
-
     const insertOrUpdate = db.prepare(`
         INSERT INTO message_counts (user_id, guild_id, count) 
         VALUES (?, ?, 1)
@@ -121,113 +113,122 @@ client.on('messageCreate', (message) => {
     insertOrUpdate.run(message.author.id, message.guild.id);
 });
 
-// スラッシュコマンド・ボタンの処理
+// 🟢 指定されたページのランキング埋め込みとボタンを生成するヘルパー関数
+async function generateRankingPage(guild, currentPageId, currentUserId) {
+    const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guild.id);
+    
+    // Botを除外した「有効なユーザーリスト」を作る
+    const activeUsers = [];
+    let myRank = '圏外';
+    let myCount = 0;
+
+    let activeRank = 0;
+    for (let i = 0; i < allRows.length; i++) {
+        const userId = allRows[i].user_id;
+        const count = allRows[i].count;
+        const user = client.users.cache.get(userId);
+
+        if (user && user.bot) continue; // Botは除外
+
+        activeRank++;
+        activeUsers.push({ rank: activeRank, userId: userId, count: count });
+
+        if (userId === currentUserId) {
+            myRank = `${activeRank}位`;
+            myCount = count;
+        }
+    }
+
+    if (activeUsers.length === 0) return { embeds: [], components: [], error: 'データがありません' };
+
+    const maxPages = Math.ceil(activeUsers.length / 10);
+    let page = currentPageId;
+    if (page < 1) page = 1;
+    if (page > maxPages) page = maxPages;
+
+    // 1ページ10人ずつ切り出す
+    const start = (page - 1) * 10;
+    const end = start + 10;
+    const pageUsers = activeUsers.slice(start, end);
+
+    let rankingText = '';
+    const medals = ['🥇', '🥈', '🥉'];
+
+    for (const u of pageUsers) {
+        const medal = medals[u.rank - 1] || `  ${u.rank}位.`;
+        rankingText += `${medal} <@${u.userId}>: **${u.count}回**\n`;
+    }
+
+    const embed = new EmbedBuilder()
+        .setTitle(`発言回数ランキング (${page} / ${maxPages} ページ)`)
+        .setDescription(rankingText)
+        .setColor('#FFD700')
+        .addFields({ name: 'あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
+        .setTimestamp();
+
+    // ページ切り替え用のボタン作成
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId(`prev_${page}`)
+            .setLabel('前へ ◀')
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(page === 1), // 1ページ目なら「前へ」を押せなくする
+        new ButtonBuilder()
+            .setCustomId(`next_${page}`)
+            .setLabel('▶ 次へ')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(page === maxPages) // 最後のページなら「次へ」を押せなくする
+    );
+
+    return { embeds: [embed], components: [row] };
+}
+
+// インタラクション（コマンド・ボタン）処理
 client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
     // 1. /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
-        // 🟢 タイムアウト（3秒ルール）対策として、まず「考え中」の状態にします
-        await interaction.deferReply(); 
-
+        await interaction.deferReply();
         const userId = interaction.user.id;
         const row = db.prepare("SELECT count FROM message_counts WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
         const count = row ? row.count : 0;
         
-        // 🟢 editReply を使って全員に結果を表示（メンション形式・さん無し）
         await interaction.editReply({
-            content: `<@${userId}> さんのこのサーバーでの発言数は **${count}回** だよ〜`
+            content: `<@${userId}> さんのこのサーバーでの発言回数は **${count}回** です！`
         });
     }
 
     // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
-        // 🟢 タイムアウト対策として、まず「考え中」の状態にします
         await interaction.deferReply();
+        await interaction.guild.members.fetch();
 
-        const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guildId);
-        
-        if (allRows.length === 0) {
+        const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id);
+        if (pageData.error) {
             return await interaction.editReply({ content: 'まだこのサーバーに発言データがありません。' });
         }
 
-        await interaction.guild.members.fetch();
-
-        let rankingText = '';
-        const medals = ['🥇', '🥈', '🥉'];
-        let myRank = '圏外';
-        let myCount = 0;
-
-        let activeRank = 0;
-        for (let i = 0; i < allRows.length; i++) {
-            const userId = allRows[i].user_id;
-            const count = allRows[i].count;
-            const user = client.users.cache.get(userId);
-
-            if (user && user.bot) continue; // Bot除外
-
-            activeRank++;
-
-            // 🟢 ランキング表示を純粋なメンション形式に変更
-            if (activeRank <= 10) {
-                const medal = medals[activeRank - 1] || `  ${activeRank}位.`;
-                rankingText += `${medal} <@${userId}>: **${count}回**\n`;
-            }
-
-            if (userId === interaction.user.id) {
-                myRank = `${activeRank}位`;
-                myCount = count;
-            }
-        }
-
-        const embed = new EmbedBuilder()
-            .setTitle('🏆 発言数ランキング (TOP 10)')
-            .setDescription(rankingText || '有効なユーザーの発言がありません。')
-            .setColor('#FFD700')
-            .addFields({ name: ' あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
-            .setTimestamp();
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('view_all_ranking')
-                .setLabel('全員の順位を表示 (Bot除外)')
-                .setStyle(ButtonStyle.Primary)
-        );
-
-        await interaction.editReply({ embeds: [embed], components: [row] });
+        await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. ボタン（全員の順位を表示）が押されたときの処理
-    if (interaction.isButton() && interaction.customId === 'view_all_ranking') {
-        // ボタンを押した本人にだけファイルを送信する（ephemeral: true）
-        await interaction.deferReply({ ephemeral: true });
+    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理
+    if (interaction.isButton()) {
+        const [action, pageStr] = interaction.customId.split('_');
+        let page = parseInt(pageStr, 10);
 
-        const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guildId);
+        if (action === 'prev') page--;
+        if (action === 'next') page++;
+
+        // ボタンを押した人以外の画面が変わるのを防ぐため、update（メッセージの書き換え）を行う
+        await interaction.deferUpdate();
+        await interaction.guild.members.fetch();
+
+        const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id);
         
-        let fileContent = `【${interaction.guild.name}】発言数全順位リスト（Bot除外）\n`;
-        fileContent += `========================================\n\n`;
-
-        let activeRank = 0;
-        for (let i = 0; i < allRows.length; i++) {
-            const userId = allRows[i].user_id;
-            const count = allRows[i].count;
-            const user = client.users.cache.get(userId);
-
-            if (user && user.bot) continue; // Bot除外
-
-            activeRank++;
-            const username = user ? user.username : '退会したユーザー';
-            fileContent += `${activeRank}位: ${username} (${count}回)\n`;
-        }
-
-        const buffer = Buffer.from(fileContent, 'utf-8');
-        const attachment = new AttachmentBuilder(buffer, { name: 'all_ranking.txt' });
-
-        await interaction.editReply({
-            content: 'サーバー内の全員の順位ファイルを生成しました！以下からダウンロードして確認できます。',
-            files: [attachment]
-        });
+        // 画面のランキングを次のページのデータに書き換える
+        await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 });
 

@@ -43,13 +43,19 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
+        .setDescription('指定したユーザー（空欄の場合は自分）の発言回数を表示します')
+        .addUserOption(option => 
+            option
+                .setName('user')
+                .setDescription('発言数を見たいユーザーを選んでください（空欄の場合は自分が選択されます）')
+                .setRequired(false)
+        ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
+        .setDescription('このサーバーの発言回数ランキングを表示します'),
     new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
+        .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
@@ -174,7 +180,7 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言回数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
@@ -183,12 +189,12 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`prev_${page}`)
-            .setLabel('前へ ◀')
+            .setLabel('前のページ ◀')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(page === 1),
         new ButtonBuilder()
             .setCustomId('next_' + page)
-            .setLabel('▶ 次へ')
+            .setLabel('▶ 次のページ')
             .setStyle(ButtonStyle.Primary)
             .setDisabled(page === maxPages)
     );
@@ -200,22 +206,29 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理 (バグ修正箇所)
+    // 1. /count コマンドの処理 (通知がいかない埋め込みカード形式)
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
-        const userId = interaction.user.id;
+        
+        const targetUser = interaction.options.getUser('user');
+        const userId = targetUser ? targetUser.id : interaction.user.id;
+        
         const res = await pool.query(
             "SELECT count FROM message_counts WHERE user_id = $1 AND guild_id = $2",
             [userId, guildId]
         );
         const rows = res.rows;
+        const count = rows.length > 0 ? rows[0].count : 0; // 👈 rows[0].count にきれいに修正
         
-        // 🟢 rows[0].count に修正し、データがあればその数を、なければ0を表示するように安全に書き換えました
-        const count = rows.length > 0 ? rows[0].count : 0;
-        
-        await interaction.editReply({
-            content: `<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`
-        });
+        // 🟢 ランキングと同じキレイなカード型（Embed）にして送信します
+        // 🟢 埋め込みの中にメンションを入れても、Discordの仕様で相手に通知（音）は飛びません！
+        const embed = new EmbedBuilder()
+            .setTitle('📊 総発言数の確認')
+            .setDescription(`<@${userId}> さんのこのサーバーでの発言回数は **${count}回** です！`)
+            .setColor('#3498db') // さわやかな青色
+            .setTimestamp();
+            
+        await interaction.editReply({ embeds: [embed] });
     }
 
     // 2. /ranking コマンドの処理

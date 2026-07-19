@@ -202,7 +202,7 @@ client.on('interactionCreate', async (interaction) => {
     // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
-        await interaction.guild.members.fetch();
+        await interaction.guild.members.fetch(); // 最初のコマンド時のみしっかりダウンロードする
 
         const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id);
         if (pageData.error) {
@@ -212,7 +212,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（修正版）
+    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（タイムアウト対策版）
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);
@@ -220,10 +220,10 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'prev') page--;
         if (action === 'next') page++;
 
-        await interaction.guild.members.fetch();
+        // 🛑 重かった「await interaction.guild.members.fetch();」を完全に削除しました！
         const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id);
         
-        // 🟢 deferUpdate の代わりに、ボタンの応答として直接画面を最新のページに更新（上書き）します
+        // 直接画面を最新のページに更新（上書き）します
         await interaction.update({ embeds: pageData.embeds, components: pageData.components });
     }
 });

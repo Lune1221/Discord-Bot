@@ -1,11 +1,11 @@
-// Renderのスリープを防ぐためのWebサーバー設定
+// Renderのスリープを防ぐためのWebサーバー設定（最優先でポートを解放）
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
 app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
 const Database = require('better-sqlite3');
 require('dotenv').config();
 
@@ -32,13 +32,18 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
+// 🟢 過去ログスキャン用の /scan コマンドを定義
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
         .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）')
+        .setDescription('このサーバーの発言数ランキングを表示します'),
+    new SlashCommandBuilder()
+        .setName('scan')
+        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // サーバー管理者のみ実行可能
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -83,26 +88,19 @@ async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] のスキャンとデータベース保存が完了しました！`);
 }
 
+// 🟢 起動時の重い処理（過去スキャン）を完全に消去し、一瞬で起動するように変更
 client.once('ready', async () => {
     console.log(`${client.user.tag} が起動しました！`);
     try {
         console.log('スラッシュコマンドを登録中...');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
-
-        const rowCount = db.prepare("SELECT COUNT(*) as count FROM message_counts").get();
-        if (rowCount.count === 0) {
-            for (const [_, guild] of client.guilds.cache) {
-                await fetchAllMessages(guild);
-            }
-        } else {
-            console.log("すでにデータが保存されているため、過去スキャンをスキップしました（通常起動）");
-        }
     } catch (error) {
         console.error(error);
     }
 });
 
+// リアルタイムの発言をカウントする処理
 client.on('messageCreate', (message) => {
     if (message.author.bot || !message.guild) return;
     const insertOrUpdate = db.prepare(`
@@ -112,11 +110,11 @@ client.on('messageCreate', (message) => {
     `);
     insertOrUpdate.run(message.author.id, message.guild.id);
 });
+
 // 指定されたページのランキング埋め込みとボタンを生成するヘルパー関数
 async function generateRankingPage(guild, currentPageId, currentUserId) {
     const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guild.id);
     
-    // Botを除外した「有効なユーザーリスト」を作る
     const activeUsers = [];
     let myRank = '圏外';
     let myCount = 0;
@@ -127,7 +125,7 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
         const count = allRows[i].count;
         const user = client.users.cache.get(userId);
 
-        if (user && user.bot) continue; // Botは除外
+        if (user && user.bot) continue;
 
         activeRank++;
         activeUsers.push({ rank: activeRank, userId: userId, count: count });
@@ -145,7 +143,6 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     if (page < 1) page = 1;
     if (page > maxPages) page = maxPages;
 
-    // 1ページ10人ずつ切り出す
     const start = (page - 1) * 10;
     const end = start + 10;
     const pageUsers = activeUsers.slice(start, end);
@@ -165,18 +162,17 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
         .setTimestamp();
 
-    // ページ切り替え用のボタン作成
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`prev_${page}`)
             .setLabel('前へ ◀')
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(page === 1), // 1ページ目なら「前へ」を押せなくする
+            .setDisabled(page === 1),
         new ButtonBuilder()
             .setCustomId(`next_${page}`)
             .setLabel('▶ 次へ')
             .setStyle(ButtonStyle.Primary)
-            .setDisabled(page === maxPages) // 最後のページなら「次へ」を押せなくする
+            .setDisabled(page === maxPages)
     );
 
     return { embeds: [embed], components: [row] };
@@ -202,17 +198,28 @@ client.on('interactionCreate', async (interaction) => {
     // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
-        await interaction.guild.members.fetch(); // 最初のコマンド時のみしっかりダウンロードする
+        await interaction.guild.members.fetch();
 
         const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id);
         if (pageData.error) {
-            return await interaction.editReply({ content: 'まだこのサーバーに発言データがありません。' });
+            return await interaction.editReply({ content: 'まだこのサーバーに発言データがありません。管理者は `/scan` を実行してください。' });
         }
 
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（タイムアウト対策版）
+    // 3. 🟢 新設：/scan コマンドの処理（過去のメッセージを安全に遡る）
+    if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
+        await interaction.deferReply({ ephemeral: true }); // 実行した管理者だけに途中経過を見せる
+        await interaction.editReply({ content: '過去のメッセージをすべてスキャンしています...（数分かかる場合があります）' });
+        
+        await interaction.guild.members.fetch();
+        await fetchAllMessages(interaction.guild);
+        
+        await interaction.editReply({ content: '❌ 過去ログのスキャンとデータベース保存が完全に完了しました！ `/ranking` で確認してみてください！' });
+    }
+
+    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);
@@ -220,10 +227,7 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'prev') page--;
         if (action === 'next') page++;
 
-        // 🛑 重かった「await interaction.guild.members.fetch();」を完全に削除しました！
         const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id);
-        
-        // 直接画面を最新のページに更新（上書き）します
         await interaction.update({ embeds: pageData.embeds, components: pageData.components });
     }
 });

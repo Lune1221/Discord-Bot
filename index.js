@@ -1,4 +1,4 @@
-// Renderのスリープを防ぐためのWebサーバー設定（最優先でポートを解放）
+// Renderのスリープを防ぐためのWebサーバー設定
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
@@ -6,19 +6,24 @@ app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！')
 app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
 
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-const db = new Database('database.db');
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false }
+});
 
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS message_counts (
-        user_id TEXT,
-        guild_id TEXT,
-        count INTEGER DEFAULT 0,
-        PRIMARY KEY (user_id, guild_id)
-    )
-`).run();
+async function initDatabase() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS message_counts (
+            user_id TEXT,
+            guild_id TEXT,
+            count INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, guild_id)
+        );
+    `);
+}
 
 const client = new Client({
     intents: [
@@ -32,40 +37,29 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-// 🟢 過去ログスキャン用の /scan コマンドを定義
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
+        .setDescription('このサーバーでのあなたの発言数を表示します'),
     new SlashCommandBuilder()
         .setName('ranking')
         .setDescription('このサーバーの発言数ランキングを表示します'),
     new SlashCommandBuilder()
         .setName('scan')
         .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator) // サーバー管理者のみ実行可能
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// 過去のメッセージを一括スキャンする関数
+// 過去のメッセージを一括スキャンしてSupabaseに高速保存する関数
 async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
     
-    const insertOrUpdate = db.prepare(`
-        INSERT INTO message_counts (user_id, guild_id, count) 
-        VALUES (?, ?, 1)
-        ON CONFLICT(user_id, guild_id) DO UPDATE SET count = count + 1
-    `);
+    // 一時的にメモリ上でカウントを合算するための連想配列
+    const localCounts = {};
 
-    const transaction = db.transaction((messages) => {
-        for (const msg of messages) {
-            if (msg.author.bot) continue;
-            insertOrUpdate.run(msg.author.id, guild.id);
-        }
-    });
-    
     for (const [channelId, channel] of textChannels) {
         let lastId = null;
         while (true) {
@@ -76,7 +70,11 @@ async function fetchAllMessages(guild) {
                 const messages = await channel.messages.fetch(options);
                 if (messages.size === 0) break;
 
-                transaction(messages.values());
+                for (const msg of messages.values()) {
+                    if (msg.author.bot) continue;
+                    const uId = msg.author.id;
+                    localCounts[uId] = (localCounts[uId] || 0) + 1;
+                }
 
                 lastId = messages.last().id;
             } catch (error) {
@@ -85,14 +83,27 @@ async function fetchAllMessages(guild) {
             }
         }
     }
-    console.log(`[${guild.name}] のスキャンとデータベース保存が完了しました！`);
+
+    // 🟢 集計したデータをSupabaseへまとめて高速保存（超高速化）
+    console.log('Supabaseへデータを一括送信中...');
+    const queryText = `
+        INSERT INTO message_counts (user_id, guild_id, count) 
+        VALUES ($1, $2, $3)
+        ON CONFLICT(user_id, guild_id) DO UPDATE SET count = message_counts.count + $3
+    `;
+
+    for (const [uId, totalCount] of Object.entries(localCounts)) {
+        await pool.query(queryText, [uId, guild.id, totalCount]);
+    }
+
+    console.log(`[${guild.name}] のスキャンとSupabaseへの保存が完了しました！`);
 }
 
-// 🟢 起動時の重い処理（過去スキャン）を完全に消去し、一瞬で起動するように変更
 client.once('ready', async () => {
     console.log(`${client.user.tag} が起動しました！`);
     try {
-        console.log('スラッシュコマンドを登録中...');
+        await initDatabase();
+        console.log('データベースの接続・初期化に成功しました！');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
     } catch (error) {
@@ -100,20 +111,26 @@ client.once('ready', async () => {
     }
 });
 
-// リアルタイムの発言をカウントする処理
-client.on('messageCreate', (message) => {
+client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
-    const insertOrUpdate = db.prepare(`
-        INSERT INTO message_counts (user_id, guild_id, count) 
-        VALUES (?, ?, 1)
-        ON CONFLICT(user_id, guild_id) DO UPDATE SET count = count + 1
-    `);
-    insertOrUpdate.run(message.author.id, message.guild.id);
+    try {
+        const queryText = `
+            INSERT INTO message_counts (user_id, guild_id, count) 
+            VALUES ($1, $2, 1)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET count = message_counts.count + 1
+        `;
+        await pool.query(queryText, [message.author.id, message.guild.id]);
+    } catch (error) {
+        console.error('リアルタイムカウントの保存に失敗しました:', error);
+    }
 });
 
-// 指定されたページのランキング埋め込みとボタンを生成するヘルパー関数
 async function generateRankingPage(guild, currentPageId, currentUserId) {
-    const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guild.id);
+    const res = await pool.query(
+        "SELECT user_id, count FROM message_counts WHERE guild_id = $1 ORDER BY count DESC",
+        [guild.id]
+    );
+    const allRows = res.rows;
     
     const activeUsers = [];
     let myRank = '圏外';
@@ -169,7 +186,7 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(page === 1),
         new ButtonBuilder()
-            .setCustomId(`next_${page}`)
+            .setCustomId('next_' + page)
             .setLabel('▶ 次へ')
             .setStyle(ButtonStyle.Primary)
             .setDisabled(page === maxPages)
@@ -178,24 +195,25 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     return { embeds: [embed], components: [row] };
 }
 
-// インタラクション（コマンド・ボタン）処理
 client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         const userId = interaction.user.id;
-        const row = db.prepare("SELECT count FROM message_counts WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
-        const count = row ? row.count : 0;
+        const res = await pool.query(
+            "SELECT count FROM message_counts WHERE user_id = $1 AND guild_id = $2",
+            [userId, guildId]
+        );
+        const rows = res.rows;
+        const count = rows.length > 0 ? rows[0].count : 0;
         
         await interaction.editReply({
             content: `<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`
         });
     }
 
-    // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
         await interaction.guild.members.fetch();
@@ -208,18 +226,16 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. 🟢 新設：/scan コマンドの処理（過去のメッセージを安全に遡る）
     if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
-        await interaction.deferReply({ ephemeral: true }); // 実行した管理者だけに途中経過を見せる
-        await interaction.editReply({ content: '過去のメッセージをすべてスキャンしています...（数分かかる場合があります）' });
+        await interaction.deferReply({ ephemeral: true });
+        await interaction.editReply({ content: '過去のメッセージをすべてSupabaseに高速スキャン・同期しています...' });
         
         await interaction.guild.members.fetch();
         await fetchAllMessages(interaction.guild);
         
-        await interaction.editReply({ content: '❌ 過去ログのスキャンとデータベース保存が完全に完了しました！ `/ranking` で確認してみてください！' });
+        await interaction.editReply({ content: '✅ 過去ログのスキャンとSupabaseへの保存が完全に完了しました！コードを更新してもデータはもう消えません！' });
     }
 
-    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);

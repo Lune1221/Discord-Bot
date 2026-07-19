@@ -212,7 +212,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. ボタン（「前へ」「次へ」）が押されたときの処理
+    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（修正版）
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);
@@ -220,14 +220,11 @@ client.on('interactionCreate', async (interaction) => {
         if (action === 'prev') page--;
         if (action === 'next') page++;
 
-        // ボタンを押した人以外の画面が変わるのを防ぐため、update（メッセージの書き換え）を行う
-        await interaction.deferUpdate();
         await interaction.guild.members.fetch();
-
         const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id);
         
-        // 画面のランキングを次のページのデータに書き換える
-        await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
+        // 🟢 deferUpdate の代わりに、ボタンの応答として直接画面を最新のページに更新（上書き）します
+        await interaction.update({ embeds: pageData.embeds, components: pageData.components });
     }
 });
 

@@ -2,7 +2,7 @@
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
+app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
 app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
 
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
@@ -38,7 +38,7 @@ const commands = [
         .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します')
+        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）')
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -112,8 +112,7 @@ client.on('messageCreate', (message) => {
     `);
     insertOrUpdate.run(message.author.id, message.guild.id);
 });
-
-// 🟢 指定されたページのランキング埋め込みとボタンを生成するヘルパー関数
+// 指定されたページのランキング埋め込みとボタンを生成するヘルパー関数
 async function generateRankingPage(guild, currentPageId, currentUserId) {
     const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guild.id);
     
@@ -160,10 +159,10 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`発言回数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
-        .addFields({ name: 'あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
+        .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
         .setTimestamp();
 
     // ページ切り替え用のボタン作成
@@ -196,7 +195,7 @@ client.on('interactionCreate', async (interaction) => {
         const count = row ? row.count : 0;
         
         await interaction.editReply({
-            content: `<@${userId}> さんのこのサーバーでの発言回数は **${count}回** です！`
+            content: `<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`
         });
     }
 
@@ -213,7 +212,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理
+    // 3. ボタン（「前へ」「次へ」）が押されたときの処理
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);

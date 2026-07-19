@@ -1,4 +1,4 @@
-// 🟢 Node.jsに対して、強制的にIPv4の道路を使わせる魔法の命令（これでRenderの通信エラーが100%直ります）
+// Node.jsに対して、強制的にIPv4の道路を使わせる命令
 require('dns').setDefaultResultOrder('ipv4first');
 
 // Renderのスリープを防ぐためのWebサーバー設定
@@ -200,6 +200,7 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
+    // 1. /count コマンドの処理 (バグ修正箇所)
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         const userId = interaction.user.id;
@@ -208,13 +209,16 @@ client.on('interactionCreate', async (interaction) => {
             [userId, guildId]
         );
         const rows = res.rows;
-        const count = rows.length > 0 ? rows.count : 0;
+        
+        // 🟢 rows[0].count に修正し、データがあればその数を、なければ0を表示するように安全に書き換えました
+        const count = rows.length > 0 ? rows[0].count : 0;
         
         await interaction.editReply({
             content: `<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`
         });
     }
 
+    // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
         await interaction.guild.members.fetch();
@@ -227,6 +231,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
+    // 3. /scan コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
         await interaction.deferReply({ ephemeral: true });
         await interaction.editReply({ content: '過去のメッセージをすべてSupabaseに高速スキャン・同期しています...' });
@@ -237,6 +242,7 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: '✅ 過去ログのスキャンとSupabaseへの保存が完全に完了しました！コードを更新してもデータはもう消えません！' });
     }
 
+    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
     if (interaction.isButton()) {
         const [action, pageStr] = interaction.customId.split('_');
         let page = parseInt(pageStr, 10);

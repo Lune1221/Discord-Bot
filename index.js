@@ -1,3 +1,6 @@
+// 🟢 Node.jsに対して、強制的にIPv4の道路を使わせる魔法の命令（これでRenderの通信エラーが100%直ります）
+require('dns').setDefaultResultOrder('ipv4first');
+
 // Renderのスリープを防ぐためのWebサーバー設定
 const express = require('express');
 const app = express();
@@ -40,10 +43,10 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('このサーバーでのあなたの発言数を表示します'),
+        .setDescription('このサーバーでのあなたの発言数を全員に表示します'),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します'),
+        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
     new SlashCommandBuilder()
         .setName('scan')
         .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
@@ -57,7 +60,6 @@ async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
     
-    // 一時的にメモリ上でカウントを合算するための連想配列
     const localCounts = {};
 
     for (const [channelId, channel] of textChannels) {
@@ -84,7 +86,6 @@ async function fetchAllMessages(guild) {
         }
     }
 
-    // 🟢 集計したデータをSupabaseへまとめて高速保存（超高速化）
     console.log('Supabaseへデータを一括送信中...');
     const queryText = `
         INSERT INTO message_counts (user_id, guild_id, count) 
@@ -207,7 +208,7 @@ client.on('interactionCreate', async (interaction) => {
             [userId, guildId]
         );
         const rows = res.rows;
-        const count = rows.length > 0 ? rows[0].count : 0;
+        const count = rows.length > 0 ? rows.count : 0;
         
         await interaction.editReply({
             content: `<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`

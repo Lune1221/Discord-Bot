@@ -1,9 +1,18 @@
+// 🟢 Renderのスリープを防ぐためのWebサーバー設定（ポート10000番で待機）
+const express = require('express');
+const app = express();
+const port = process.env.PORT || 10000;
+app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
+app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
+
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } = require('discord.js');
 const Database = require('better-sqlite3');
 require('dotenv').config();
 
+// データベースファイルの作成・接続
 const db = new Database('database.db');
 
+// テーブルがなければ作成する (ユーザーID、サーバーID、発言数)
 db.prepare(`
     CREATE TABLE IF NOT EXISTS message_counts (
         user_id TEXT,
@@ -18,13 +27,14 @@ const client = new Client({
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers
+        GatewayIntentBits.GuildMembers // サーバーメンバー情報を読み込むための権限
     ]
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
+// スラッシュコマンド（/count と /ranking）の定義
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
@@ -36,7 +46,7 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// 過去メッセージの一括スキャン関数
+// 過去のメッセージをすべて遡ってカウントし、データベースに保存する関数
 async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
@@ -84,6 +94,7 @@ client.once('ready', async () => {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
 
+        // 初回起動時のみ、過去の全ログをスキャンしてデータベースへ移行
         const rowCount = db.prepare("SELECT COUNT(*) as count FROM message_counts").get();
         if (rowCount.count === 0) {
             for (const [_, guild] of client.guilds.cache) {
@@ -98,7 +109,7 @@ client.once('ready', async () => {
     }
 });
 
-// リアルタイム発言のカウント処理
+// 通常のリアルタイム発言をデータベースに保存する処理
 client.on('messageCreate', (message) => {
     if (message.author.bot || !message.guild) return;
 
@@ -117,17 +128,22 @@ client.on('interactionCreate', async (interaction) => {
 
     // 1. /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
+        // 🟢 タイムアウト（3秒ルール）対策として、まず「考え中」の状態にします
+        await interaction.deferReply(); 
+
         const userId = interaction.user.id;
         const row = db.prepare("SELECT count FROM message_counts WHERE user_id = ? AND guild_id = ?").get(userId, guildId);
         const count = row ? row.count : 0;
         
-        await interaction.reply({
-            content: `<@${userId}> さんのこのサーバーでの発言数は **${count}回** です！`
+        // 🟢 editReply を使って全員に結果を表示（メンション形式・さん無し）
+        await interaction.editReply({
+            content: `<@${userId}> さんのこのサーバーでの発言数は **${count}回** だよ〜`
         });
     }
 
     // 2. /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
+        // 🟢 タイムアウト対策として、まず「考え中」の状態にします
         await interaction.deferReply();
 
         const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guildId);
@@ -153,6 +169,7 @@ client.on('interactionCreate', async (interaction) => {
 
             activeRank++;
 
+            // 🟢 ランキング表示を純粋なメンション形式に変更
             if (activeRank <= 10) {
                 const medal = medals[activeRank - 1] || `  ${activeRank}位.`;
                 rankingText += `${medal} <@${userId}>: **${count}回**\n`;
@@ -165,16 +182,16 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         const embed = new EmbedBuilder()
-            .setTitle('発言数ランキング (TOP 10)')
+            .setTitle('🏆 発言数ランキング (TOP 10)')
             .setDescription(rankingText || '有効なユーザーの発言がありません。')
             .setColor('#FFD700')
-            .addFields({ name: 'あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
+            .addFields({ name: ' あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
             .setTimestamp();
 
         const row = new ActionRowBuilder().addComponents(
             new ButtonBuilder()
                 .setCustomId('view_all_ranking')
-                .setLabel('全員の順位を表示')
+                .setLabel('全員の順位を表示 (Bot除外)')
                 .setStyle(ButtonStyle.Primary)
         );
 
@@ -183,6 +200,7 @@ client.on('interactionCreate', async (interaction) => {
 
     // 3. ボタン（全員の順位を表示）が押されたときの処理
     if (interaction.isButton() && interaction.customId === 'view_all_ranking') {
+        // ボタンを押した本人にだけファイルを送信する（ephemeral: true）
         await interaction.deferReply({ ephemeral: true });
 
         const allRows = db.prepare("SELECT user_id, count FROM message_counts WHERE guild_id = ? ORDER BY count DESC").all(guildId);
@@ -196,10 +214,9 @@ client.on('interactionCreate', async (interaction) => {
             const count = allRows[i].count;
             const user = client.users.cache.get(userId);
 
-            if (user && user.bot) continue;
+            if (user && user.bot) continue; // Bot除外
 
             activeRank++;
-
             const username = user ? user.username : '退会したユーザー';
             fileContent += `${activeRank}位: ${username} (${count}回)\n`;
         }

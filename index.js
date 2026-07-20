@@ -43,19 +43,19 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('指定したユーザー（未指定ならあなた）の発言数を表示します')
+        .setDescription('指定したユーザーの発言回数を表示します')
         .addUserOption(option => 
             option
                 .setName('user')
-                .setDescription('発言数を見たいユーザーを選んでください（空欄なら自分）')
+                .setDescription('発言回数を見たいユーザーを選んでください。空欄の場合は自分が選択されます。')
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
+        .setDescription('このサーバーの発言数ランキングを表示します'),
     new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
+        .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
@@ -63,7 +63,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 // 過去のメッセージを一括スキャンしてSupabaseに高速保存する関数
 async function fetchAllMessages(guild) {
-    console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
+    console.log(`[${guild.name}] の過去メッセージをスキャンしています。これには数分〜数十分程時間がかかる場合があります...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
     
     const localCounts = {};
@@ -181,7 +181,7 @@ async function generateRankingPage(guild, currentPageId, currentUserId, executor
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言回数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })

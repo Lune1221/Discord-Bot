@@ -248,12 +248,12 @@ client.on('interactionCreate', async (interaction) => {
     // 3. /scan コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
         await interaction.deferReply({ ephemeral: true });
-        await interaction.editReply({ content: '過去のメッセージをすべてSupabaseに高速スキャン・同期しています...' });
+        await interaction.editReply({ content: '過去のメッセージをすべてサーバーへスキャン、同期しています...' });
         
         await interaction.guild.members.fetch();
         await fetchAllMessages(interaction.guild);
         
-        await interaction.editReply({ content: '✅ 過去ログのスキャンとSupabaseへの保存が完全に完了しました！コードを更新してもデータはもう消えません！' });
+        await interaction.editReply({ content: '✅ 過去ログのスキャンとサーバーへの保存が完了しました！' });
     }
 
     // 4. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（本人確認ガードを追加）

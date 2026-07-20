@@ -8,7 +8,7 @@ const port = process.env.PORT || 10000;
 app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
 app.listen(port, () => console.log(`Webサーバーがポート ${port} で起動しました`));
 
-const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, ActivityType } = require('discord.js');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -43,25 +43,35 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('指定したユーザーの発言数を表示します')
+        .setDescription('指定したユーザー（未指定ならあなた）の発言数を表示します')
         .addUserOption(option => 
             option
                 .setName('user')
-                .setDescription('発言回数を見たいユーザーを選んでください（空欄なら自分）')
+                .setDescription('発言数を見たいユーザーを選んでください（空欄なら自分）')
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言回数ランキングを表示します'),
+        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
     new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
+        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// 過去のメッセージを一括スキャンしてSupabaseに高速保存する関数
+// 🟢 サーバー数をステータス欄に自動セットする関数（新機能）
+function updateServerCountStatus() {
+    const serverCount = client.guilds.cache.size;
+    client.user.setActivity({
+        name: `${serverCount} 個のサーバーで稼働中`,
+        type: ActivityType.Competing // 「〜に参戦中」のステータス形式になります
+    });
+    console.log(`ステータスを更新しました: ${serverCount}個のサーバーで稼働中`);
+}
+
+// 過去のメッセージを一括スキャンしてSupabaseに保存する関数
 async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
@@ -113,10 +123,17 @@ client.once('ready', async () => {
         console.log('データベースの接続・初期化に成功しました！');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
+        
+        // 🟢 起動した瞬間にサーバー数をステータスに反映します
+        updateServerCountStatus();
     } catch (error) {
         console.error(error);
     }
 });
+
+// 🟢 新しいサーバーに参加した時、または退出した時にもステータスを自動更新（新機能）
+client.on('guildCreate', () => updateServerCountStatus());
+client.on('guildDelete', () => updateServerCountStatus());
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
@@ -206,7 +223,7 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理 (他人メンション通知オフ＆バグ修正完了版)
+    // 1. /count コマンドの処理 (他人指定・埋め込み形式・undefinedバグ完全修正)
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         
@@ -219,7 +236,7 @@ client.on('interactionCreate', async (interaction) => {
         );
         const rows = res.rows;
         
-        // 🟢 【重要】 rows[0].count にきれいに修正しました！
+        // 🟢 配列の1件目を安全に取り出すため、rows[0].count にきれいに修正しました
         const count = rows.length > 0 ? rows[0].count : 0;
         
         const embed = new EmbedBuilder()
@@ -272,7 +289,6 @@ client.on('interactionCreate', async (interaction) => {
 
         const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id, executorId);
         await interaction.update({ embeds: pageData.embeds, components: pageData.components });
-    }
-});
+    }});
 
 client.login(TOKEN);

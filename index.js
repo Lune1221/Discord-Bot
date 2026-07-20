@@ -43,19 +43,19 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('指定したユーザー（空欄の場合は自分）の発言回数を表示します')
+        .setDescription('指定したユーザー（未指定ならあなた）の発言数を表示します')
         .addUserOption(option => 
             option
                 .setName('user')
-                .setDescription('発言数を見たいユーザーを選んでください（空欄の場合は自分が選択されます）')
+                .setDescription('発言数を見たいユーザーを選んでください（空欄なら自分）')
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言回数ランキングを表示します'),
+        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
     new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
+        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
 ].map(command => command.toJSON());
 
@@ -132,7 +132,8 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-async function generateRankingPage(guild, currentPageId, currentUserId) {
+// 🟢 ボタンのIDに「コマンドを打った人のID」を埋め込むように調整
+async function generateRankingPage(guild, currentPageId, currentUserId, executorId) {
     const res = await pool.query(
         "SELECT user_id, count FROM message_counts WHERE guild_id = $1 ORDER BY count DESC",
         [guild.id]
@@ -180,21 +181,22 @@ async function generateRankingPage(guild, currentPageId, currentUserId) {
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`🏆 発言回数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
         .setTimestamp();
 
+    // 🟢 ボタンの裏側に「コマンドを打った人のID（executorId）」を覚えさせます
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-            .setCustomId(`prev_${page}`)
-            .setLabel('前のページ ◀')
+            .setCustomId(`prev_${page}_${executorId}`)
+            .setLabel('前へ ◀')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(page === 1),
         new ButtonBuilder()
-            .setCustomId('next_' + page)
-            .setLabel('▶ 次のページ')
+            .setCustomId(`next_${page}_${executorId}`)
+            .setLabel('▶ 次へ')
             .setStyle(ButtonStyle.Primary)
             .setDisabled(page === maxPages)
     );
@@ -206,7 +208,7 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理 (通知がいかない埋め込みカード形式)
+    // 1. /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         
@@ -218,14 +220,12 @@ client.on('interactionCreate', async (interaction) => {
             [userId, guildId]
         );
         const rows = res.rows;
-        const count = rows.length > 0 ? rows[0].count : 0; // 👈 rows[0].count にきれいに修正
+        const count = rows.length > 0 ? rows.count : 0;
         
-        // 🟢 ランキングと同じキレイなカード型（Embed）にして送信します
-        // 🟢 埋め込みの中にメンションを入れても、Discordの仕様で相手に通知（音）は飛びません！
         const embed = new EmbedBuilder()
             .setTitle('📊 総発言数の確認')
-            .setDescription(`<@${userId}> さんのこのサーバーでの発言回数は **${count}回** です！`)
-            .setColor('#3498db') // さわやかな青色
+            .setDescription(`<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`)
+            .setColor('#3498db')
             .setTimestamp();
             
         await interaction.editReply({ embeds: [embed] });
@@ -236,7 +236,8 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply();
         await interaction.guild.members.fetch();
 
-        const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id);
+        // 🟢 4つ目のパラメータに「打った本人のID（interaction.user.id）」を渡します
+        const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id, interaction.user.id);
         if (pageData.error) {
             return await interaction.editReply({ content: 'まだこのサーバーに発言データがありません。管理者は `/scan` を実行してください。' });
         }
@@ -255,15 +256,24 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: '✅ 過去ログのスキャンとSupabaseへの保存が完全に完了しました！コードを更新してもデータはもう消えません！' });
     }
 
-    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
+    // 4. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（本人確認ガードを追加）
     if (interaction.isButton()) {
-        const [action, pageStr] = interaction.customId.split('_');
-        let page = parseInt(pageStr, 10);
+        // ボタンのIDから「動作」「現在のページ」「コマンドを打った本人のID」を取り出します
+        const [action, pageStr, executorId] = interaction.customId.split('_');
+        
+        // 🟢 もしボタンを押した人（interaction.user.id）が、最初にコマンドを打った人（executorId）と違ったらガード！
+        if (interaction.user.id !== executorId) {
+            return await interaction.reply({
+                content: '❌ このボタンはコマンドを実行した本人しか操作できません。',
+                ephemeral: true // 👈 ボタンを押した悪戯した人にだけコッソリ見えるエラーメッセージ
+            });
+        }
 
+        let page = parseInt(pageStr, 10);
         if (action === 'prev') page--;
         if (action === 'next') page++;
 
-        const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id);
+        const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id, executorId);
         await interaction.update({ embeds: pageData.embeds, components: pageData.components });
     }
 });

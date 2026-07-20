@@ -43,16 +43,16 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('指定したユーザーの発言回数を表示します')
+        .setDescription('指定したユーザーの発言数を表示します')
         .addUserOption(option => 
             option
                 .setName('user')
-                .setDescription('発言回数を見たいユーザーを選んでください。空欄の場合は自分が選択されます。')
+                .setDescription('発言回数を見たいユーザーを選んでください（空欄なら自分）')
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します'),
+        .setDescription('このサーバーの発言回数ランキングを表示します'),
     new SlashCommandBuilder()
         .setName('scan')
         .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
@@ -63,7 +63,7 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 // 過去のメッセージを一括スキャンしてSupabaseに高速保存する関数
 async function fetchAllMessages(guild) {
-    console.log(`[${guild.name}] の過去メッセージをスキャンしています。これには数分〜数十分程時間がかかる場合があります...`);
+    console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
     
     const localCounts = {};
@@ -92,7 +92,7 @@ async function fetchAllMessages(guild) {
         }
     }
 
-    console.log('Supabaseへデータを一括送信中...');
+    console.log('サーバーへデータを一括送信中...');
     const queryText = `
         INSERT INTO message_counts (user_id, guild_id, count) 
         VALUES ($1, $2, $3)
@@ -103,7 +103,7 @@ async function fetchAllMessages(guild) {
         await pool.query(queryText, [uId, guild.id, totalCount]);
     }
 
-    console.log(`[${guild.name}] のスキャンとSupabaseへの保存が完了しました！`);
+    console.log(`[${guild.name}] のスキャンとサーバーへの保存が完了しました！`);
 }
 
 client.once('ready', async () => {
@@ -132,7 +132,6 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// 🟢 ボタンのIDに「コマンドを打った人のID」を埋め込むように調整
 async function generateRankingPage(guild, currentPageId, currentUserId, executorId) {
     const res = await pool.query(
         "SELECT user_id, count FROM message_counts WHERE guild_id = $1 ORDER BY count DESC",
@@ -181,13 +180,12 @@ async function generateRankingPage(guild, currentPageId, currentUserId, executor
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`🏆 発言回数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
         .setTimestamp();
 
-    // 🟢 ボタンの裏側に「コマンドを打った人のID（executorId）」を覚えさせます
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
             .setCustomId(`prev_${page}_${executorId}`)
@@ -208,7 +206,7 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理
+    // 1. /count コマンドの処理 (他人メンション通知オフ＆バグ修正完了版)
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         
@@ -220,11 +218,13 @@ client.on('interactionCreate', async (interaction) => {
             [userId, guildId]
         );
         const rows = res.rows;
-        const count = rows.length > 0 ? rows.count : 0;
+        
+        // 🟢 【重要】 rows[0].count にきれいに修正しました！
+        const count = rows.length > 0 ? rows[0].count : 0;
         
         const embed = new EmbedBuilder()
-            .setTitle('📊 総発言数の確認')
-            .setDescription(`<@${userId}> さんのこのサーバーでの総発言数は **${count}回** です！`)
+            .setTitle('📊 発言回数の確認')
+            .setDescription(`<@${userId}> さんのこのサーバーでの発言回数は **${count}回** です！`)
             .setColor('#3498db')
             .setTimestamp();
             
@@ -236,7 +236,6 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.deferReply();
         await interaction.guild.members.fetch();
 
-        // 🟢 4つ目のパラメータに「打った本人のID（interaction.user.id）」を渡します
         const pageData = await generateRankingPage(interaction.guild, 1, interaction.user.id, interaction.user.id);
         if (pageData.error) {
             return await interaction.editReply({ content: 'まだこのサーバーに発言データがありません。管理者は `/scan` を実行してください。' });
@@ -248,24 +247,22 @@ client.on('interactionCreate', async (interaction) => {
     // 3. /scan コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
         await interaction.deferReply({ ephemeral: true });
-        await interaction.editReply({ content: '過去のメッセージをすべてサーバーへスキャン、同期しています...' });
+        await interaction.editReply({ content: '過去のメッセージをすべてサーバーにスキャン、同期しています...' });
         
         await interaction.guild.members.fetch();
         await fetchAllMessages(interaction.guild);
         
-        await interaction.editReply({ content: '✅ 過去ログのスキャンとサーバーへの保存が完了しました！' });
+        await interaction.editReply({ content: '✅ 過去ログのスキャンとサーバーへの保存が完全に完了しました！' });
     }
 
-    // 4. 🟢 ボタン（「前へ」「次へ」）が押されたときの処理（本人確認ガードを追加）
+    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
     if (interaction.isButton()) {
-        // ボタンのIDから「動作」「現在のページ」「コマンドを打った本人のID」を取り出します
         const [action, pageStr, executorId] = interaction.customId.split('_');
         
-        // 🟢 もしボタンを押した人（interaction.user.id）が、最初にコマンドを打った人（executorId）と違ったらガード！
         if (interaction.user.id !== executorId) {
             return await interaction.reply({
                 content: '❌ このボタンはコマンドを実行した本人しか操作できません。',
-                ephemeral: true // 👈 ボタンを押した悪戯した人にだけコッソリ見えるエラーメッセージ
+                ephemeral: true
             });
         }
 

@@ -56,10 +56,18 @@ const commands = [
     new SlashCommandBuilder()
         .setName('scan')
         .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
-        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+        .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    new SlashCommandBuilder()
+        .setName('omikuji')
+        .setDescription('おみくじを引きます（1日1回限定）')
+
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
+
+// おみくじリスト
+const omikujiResults = ['大吉 ', '中吉 ', '小吉 ', '吉 ', '凶 '];
+
 
 // 🟢 サーバー数をステータス欄に自動セットする関数（新機能）
 function updateServerCountStatus() {
@@ -223,7 +231,7 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-    // 1. /count コマンドの処理 (他人指定・埋め込み形式・undefinedバグ完全修正)
+     /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         
@@ -248,7 +256,24 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: [embed] });
     }
 
-    // 2. /ranking コマンドの処理
+         /omikuji コマンドの処理（結果のみバージョン）
+    if (interaction.isChatInputCommand() && interaction.commandName === 'omikuji') {
+        await interaction.deferReply();
+
+        // リストからランダムに1つ選ぶ
+        const randomFortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
+
+        const embed = new EmbedBuilder()
+            .setTitle('おみくじ結果')
+            .setDescription(`<@${interaction.user.id}> さんの今日のおみくじ結果は...`)
+            .addFields({ name: '【運勢】', value: `**${randomFortune}**`, inline: false })
+            .setColor('#ff4757') // おみくじっぽい鮮やかな赤色
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+    }
+
+     /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
         await interaction.guild.members.fetch();

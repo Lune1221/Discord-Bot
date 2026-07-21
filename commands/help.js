@@ -16,7 +16,8 @@ module.exports = {
                 { name: ' /omikuji', value: '今日のおみくじを引きます。(1日1回まで)', inline: false },
                 { name: ' /level', value: '自分のレベルを見ることができます。', inline: false },
                 { name: ' /level-set', value: '【管理者専用】レベル通知のチャンネルを設定します。', inline: false },
-                { name: ' /scan', value: '【管理者専用】過去ログをすべて読み込み、サーバーと同期します。', inline: false },
+                { name: ' /say', value: '【管理者専用】チャンネルを指定してそのチャンネルにBotを経由してメッセージを送信します。', inline: false },
+                { name: ' /scan', value: '【管理者専用】過去ログをすべて読み込み、サーバーと同期します。', inline: false }
             )
             .setFooter({ text: '※発言回数はクラウドに安全に自動記録されています。' })
             .setTimestamp();

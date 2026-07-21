@@ -2,7 +2,7 @@ require('dns').setDefaultResultOrder('ipv4first');
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
+app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
@@ -63,7 +63,7 @@ client.once('ready', async () => {
 
     // 🟢 ボットのステータスに導入サーバー数を表示する設定
     const serverCount = client.guilds.cache.size;
-    client.user.setActivity(`${serverCount} 個のサーバー`, { type: ActivityType.Watching });
+    client.user.setActivity(`${serverCount} 個のサーバーで稼働`, { type: ActivityType.Watching });
 
     // Discordへスラッシュコマンドを自動登録する処理
     const rest = new REST({ version: '10' }).setToken(TOKEN);

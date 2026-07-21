@@ -292,3 +292,25 @@ client.on('interactionCreate', async (interaction) => {
         
         if (interaction.user.id !== executorId) {
             return await interaction.reply({
+                        content: '❌ このボタンはコマンドを実行した本人しか操作できません。',
+        ephemeral: true
+    });
+}
+
+let page = parseInt(pageStr, 10);
+
+if (action === 'prev') page--;
+if (action === 'next') page++;
+
+const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id, executorId);
+
+await interaction.update({ 
+    embeds: pageData.embeds, 
+    components: pageData.components 
+});
+            
+    }
+}
+);
+
+client.login(TOKEN);

@@ -183,18 +183,17 @@ module.exports = {
                 if (logChannel) await logChannel.send({ content: `🔓 アンケート「**${question}**」が作成者によって開票されました！` }).catch(() => {});
                 return await btnInteraction.update({ embeds: [generateEmbed()], components: [] });
             }
-
-            if (btnInteraction.customId === 'm_free_btn') {
-                                const modal = new ModalBuilder()
-                    .setCustomId(`m_modal_${replyMessage.id}`)
+            if (btnInteraction.customId.includes('free')) {
+                const modal = new ModalBuilder()
+                    .setCustomId(`m-modal-${replyMessage.id}`)
                     .setTitle('アンケートへの入力');
 
                 const textInput = new TextInputBuilder()
                     .setCustomId('m_text_field')
-                    .setLabel('追加または投票したい言葉を入力（100文字以内）')
-                    .setPlaceholder('例: Discord 、 1000 等')
+                    .setLabel('追加または投票したい言葉を入力（20文字以内）')
+                    .setPlaceholder('例: Discord, 1000 票')
                     .setStyle(TextInputStyle.Short)
-                    .setMaxLength(100)
+                    .setMaxLength(20)
                     .setRequired(true);
 
                 modal.addComponents(new ActionRowBuilder().addComponents(textInput));
@@ -215,7 +214,7 @@ module.exports = {
             await sendLogMessage(btnInteraction.user, `選択肢 [ ${selectNum} ] **${choiceText}** に投票しました。`);
         });
 
-        // ⏳ 期限切れ（タイマー終了）になったときの処理
+        // ⏳ 投票期限終了の処理
         collector.on('end', async () => {
             if (durationMs) {
                 isClosed = true;
@@ -231,7 +230,7 @@ module.exports = {
         // 📝 自由入力（文字ポップアップ）が送信されたときの処理
         const modalListener = async (modalInteraction) => {
             if (isClosed) return;
-            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m-modal_${replyMessage.id}`) return;
+            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m-modal-${replyMessage.id}`) return;
             
             await modalInteraction.deferUpdate();
             const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
@@ -251,7 +250,7 @@ module.exports = {
                 }
                 await replyMessage.edit({ embeds: [generateEmbed()] });
                 
-                await sendLogMessage(modalInteraction.user, ` **「${inputWord}」** を入力して投票しました。`);
+                await sendLogMessage(modalInteraction.user, `新しい言葉 **「${inputWord}」** を入力して投票しました。`);
             }
         };
 

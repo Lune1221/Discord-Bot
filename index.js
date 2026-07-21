@@ -8,7 +8,7 @@ app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
 const { Pool } = require('pg');
 const fs = require('fs');
-const path = require('path'); // 念のためpathの読み込みも記述
+const path = require('path');
 require('dotenv').config();
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -17,7 +17,7 @@ async function initDatabase() {
     await pool.query(`CREATE TABLE IF NOT EXISTS message_counts (user_id TEXT, guild_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS omikuji_cooldowns (user_id TEXT, guild_id TEXT, last_date TEXT, PRIMARY KEY (user_id, guild_id));`);
     
-    // 🟢 【追加】通知チャンネル設定を保存するテーブル
+    // 通知チャンネル設定を保存するテーブル
     await pool.query(`CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, level_channel_id TEXT);`);
 }
 
@@ -42,9 +42,24 @@ if (fs.existsSync(foldersPath)) {
 client.once('ready', async () => {
     await initDatabase();
     console.log(`${client.user.tag} でログインしました！`);
+
+    // Discordへスラッシュコマンドを自動登録する処理
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    try {
+        console.log('スラッシュコマンドの登録を開始します...');
+        const commandsData = client.commands.map(cmd => cmd.data.toJSON());
+        
+        await rest.put(
+            Routes.applicationCommands(CLIENT_ID),
+            { body: commandsData },
+        );
+        console.log('✨ スラッシュコマンドの登録が完了しました！');
+    } catch (error) {
+        console.error('コマンド登録エラー:', error);
+    }
 });
 
-// 🟢 【変更】メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
+// メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     try {

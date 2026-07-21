@@ -1,18 +1,17 @@
- const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits } = require('discord.js');
 
-// 🟢 入力された「30m」「1h」などの文字をミリ秒に変換する関数
 function parseDuration(str) {
-    if (!str) return 86400000; // 未入力ならデフォルト24時間
+    if (!str) return 86400000;
     const match = str.match(/^(\d+)([mhdwy])$/);
     if (!match) return null;
     const value = parseInt(match[1], 10);
     const unit = match[2];
     switch (unit) {
-        case 'm': return value * 60 * 1000;         // 分
-        case 'h': return value * 60 * 60 * 1000;    // 時間
-        case 'd': return value * 24 * 60 * 60 * 1000; // 日
-        case 'w': return value * 7 * 24 * 60 * 60 * 1000; // 週
-        case 'y': return value * 365 * 24 * 60 * 60 * 1000; // 年
+        case 'm': return value * 60 * 1000;
+        case 'h': return value * 60 * 60 * 1000;
+        case 'd': return value * 24 * 60 * 60 * 1000;
+        case 'w': return value * 7 * 24 * 60 * 60 * 1000;
+        case 'y': return value * 365 * 24 * 60 * 60 * 1000;
         default: return null;
     }
 }
@@ -33,7 +32,6 @@ module.exports = {
                 { name: '🔘 ボタン（決まった選択肢から選ぶ）', value: 'choice' },
                 { name: '📝 自由入力（文字を直接入力して追加する）', value: 'input' }
             ))
-        // 🟢 期限を設定するオプションを追加（30m, 1h, 1d, 1y など）
         .addStringOption(o => o.setName('duration').setDescription('期限を入力（例: 30m, 1h, 1d, 1y）空欄なら24時間').setRequired(false))
         .addStringOption(o => o.setName('choice1').setDescription('選択肢1（ボタン形式の時のみ入力）').setRequired(false))
         .addStringOption(o => o.setName('choice2').setDescription('選択肢2（ボタン形式の時のみ入力）').setRequired(false))
@@ -59,15 +57,13 @@ module.exports = {
             return await interaction.editReply({ content: '❌ ボタン形式（choice）を選ぶ場合は、最低でも「選択肢1」と「選択肢2」を入力してください。' });
         }
 
-        // 🟢 期限文字の解析
         const durationMs = parseDuration(durationInput);
         if (durationMs === null) {
             return await interaction.editReply({ content: '❌ 期限の書式が正しくありません。「30m」「1h」「2d」「1y」のように半角英数字で入力してください。' });
         }
 
-        // 締め切り時刻の計算
         const endTime = Date.now() + durationMs;
-        const endTimestampStr = `<t:${Math.floor(endTime / 1000)}:R>`; // Discordの動くタイムスタンプ機能
+        const endTimestampStr = `<t:${Math.floor(endTime / 1000)}:R>`;
 
         const votes = pollMethod === 'choice' ? { 1: [], 2: [], 3: [], 4: [], 5: [] } : {};
         let isRevealed = false;
@@ -77,7 +73,6 @@ module.exports = {
             const embed = new EmbedBuilder().setTimestamp();
             let desc = `📊 **${question}**\n\n`;
 
-            // 期限表示の追加
             if (!isClosed) {
                 desc += `⏳ 投票期限: ${endTimestampStr}\n\n`;
             } else {
@@ -104,10 +99,10 @@ module.exports = {
                 }
 
                 if (pollMethod === 'choice') {
-                    desc += `1️⃣ **${c1}** ： **${votes.length} 票**\n2️⃣ **${c2}** ： **${votes.length} 票**\n`;
-                    if (c3) desc += `3️⃣ **${c3}** ： **${votes.length} 票**\n`;
-                    if (c4) desc += `4️⃣ **${c4}** ： **${votes.length} 票**\n`;
-                    if (c5) desc += `5️⃣ **${c5}** ： **${votes.length} 票**\n`;
+                    desc += `1️⃣ **${c1}** ： **${votes[1].length} 票**\n2️⃣ **${c2}** ： **${votes[2].length} 票**\n`;
+                    if (c3) desc += `3️⃣ **${c3}** ： **${votes[3].length} 票**\n`;
+                    if (c4) desc += `4️⃣ **${c4}** ： **${votes[4].length} 票**\n`;
+                    if (c5) desc += `5️⃣ **${c5}** ： **${votes[5].length} 票**\n`;
                 } else {
                     const items = Object.entries(votes);
                     if (items.length === 0) {
@@ -146,8 +141,6 @@ module.exports = {
         }
 
         const replyMessage = await interaction.editReply({ embeds: [generateEmbed()], components: rows });
-        
-        // 🟢 設定された制限時間（durationMs）だけ入力を監視するコレクター
         const collector = replyMessage.createMessageComponentCollector({ componentType: ComponentType.Button, time: durationMs });
 
         collector.on('collect', async (btnInteraction) => {
@@ -176,38 +169,43 @@ module.exports = {
                 return await btnInteraction.showModal(modal);
             }
 
-            const selectNum = parseInt(btnInteraction.customId.split('_'), 10);
+            const selectNum = parseInt(btnInteraction.customId.split('_')[2], 10);
             for (const key in votes) { votes[key] = votes[key].filter(id => id !== voterId); }
             votes[selectNum].push(voterId);
 
             await btnInteraction.update({ embeds: [generateEmbed()] });
         });
 
-        // 🟢 時間切れ（または開票完了）になった時の処理
         collector.on('end', async () => {
             isClosed = true;
-            if (pollType === 'hidden') isRevealed = true; // シークレットは時間切れで自動開票
-            
-            // ボタンをすべて消去して締め切り画面に更新
+            if (pollType === 'hidden') isRevealed = true;
             await replyMessage.edit({ embeds: [generateEmbed()], components: [] }).catch(() => {});
             interaction.client.off('interactionCreate', modalListener);
         });
 
         const modalListener = async (modalInteraction) => {
-if (isClosed) return;
-          if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== m_modal_${replyMessage.id}) return;
-          await modalInteraction.deferUpdate();
-          const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
-          const voterId = modalInteraction.user.id;
-          if (inputWord) {
-            for (const key in votes) { votes[key] = votes[key].filter(id => id !== voterId); }
-                          if (!votes[inputWord]) {
-                            votes[inputWord] = []; }votes[inputWord].push(voterId);
-           
-            for (const key in votes) { if (votes[key].length === 0) delete votes[key]; }
-                          await replyMessage.edit({ embeds: [generateEmbed()] });
-                         }
+            if (isClosed) return;
+            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m_modal_${replyMessage.id}`) return;
+            
+            await modalInteraction.deferUpdate();
+            const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
+            const voterId = modalInteraction.user.id;
+                     if (inputWord) {
+                for (const key in votes) { 
+                    votes[key] = votes[key].filter(id => id !== voterId); 
+                }
+                if (!votes[inputWord]) { 
+                    votes[inputWord] = []; 
+                }
+                votes[inputWord].push(voterId);
+
+                for (const key in votes) { 
+                    if (votes[key].length === 0) delete votes[key]; 
+                }
+                await replyMessage.edit({ embeds: [generateEmbed()] });
+            }
         };
-      interaction.client.on('interactionCreate', modalListener);
+
+        interaction.client.on('interactionCreate', modalListener);
     }
 };

@@ -83,7 +83,7 @@ client.on('messageCreate', async (message) => {
             }
 
             // お祝いメッセージを送信
-            await targetChannel.send(`🎉 おめでとうございます ${message.author} さん！レベル **${newLevel}** にアップしました！`);
+            await targetChannel.send(`🎉  ${message.author} おめでとうございます！レベル **${newLevel}** にアップしました！`);
         }
     } catch (e) { 
         console.error(e); 

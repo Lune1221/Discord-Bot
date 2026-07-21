@@ -1,7 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits, ChannelType } = require('discord.js');
 
 function parseDuration(str) {
-    if (!str) return null; // 空欄なら期限なし
+    if (!str) return null;
     const match = str.match(/^(\d+)([mhdwy])$/);
     if (!match) return false;
     const value = parseInt(match, 10);
@@ -19,9 +19,9 @@ function parseDuration(str) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('poll')
-        .setDescription('アンケート（投票）を作成します')
+        .setDescription('高機能なアンケート（投票）を作成します')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-        .addStringOption(o => o.setName('question').setDescription('アンケートの質問・お題内容を入力してください').setRequired(true))
+        .addStringOption(o => o.setName('question').setDescription('アンケートの質問内容を入力してください').setRequired(true))
         .addStringOption(o => o.setName('type').setDescription('結果の表示形式を選んでください').setRequired(true)
             .addChoices(
                 { name: '🔓 通常（いつでも結果が見える）', value: 'open' },
@@ -30,11 +30,9 @@ module.exports = {
         .addStringOption(o => o.setName('method').setDescription('投票の形式を選んでください').setRequired(true)
             .addChoices(
                 { name: '🔘 ボタン（決まった選択肢から選ぶ）', value: 'choice' },
-                { name: '📝 自由入力（文字を入力して投票する）', value: 'input' }
+                { name: '📝 自由入力（文字を直接入力して追加する）', value: 'input' }
             ))
-        // 🟢 1. アンケート本体を投稿する「送信先チャンネル」の指定枠（復活！）
         .addChannelOption(o => o.setName('channel').setDescription('アンケート本体を送る送信先チャンネル（空欄ならこの画面）').addChannelTypes(ChannelType.GuildText).setRequired(false))
-        // 🟢 2. 投票結果のログを裏で受け取る「回答受付先チャンネル」の指定枠
         .addChannelOption(o => o.setName('log_channel').setDescription('投票結果のログをリアルタイムで送信する受付先チャンネル（省略可能）').addChannelTypes(ChannelType.GuildText).setRequired(false))
         .addStringOption(o => o.setName('duration').setDescription('期限（例: 30m, 1h, 1d）空欄なら期限なし（無制限）').setRequired(false))
         .addStringOption(o => o.setName('choice1').setDescription('選択肢1（ボタン形式の時のみ入力）').setRequired(false))
@@ -51,9 +49,7 @@ module.exports = {
         const pollMethod = interaction.options.getString('method');
         const durationInput = interaction.options.getString('duration');
         
-        // 🟢 送信先チャンネル（未指定ならコマンドを打った場所）
         const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
-        // 🟢 回答受付先チャンネル（ログ転送用）
         const logChannel = interaction.options.getChannel('log_channel');
 
         const c1 = interaction.options.getString('choice1');
@@ -63,12 +59,12 @@ module.exports = {
         const c5 = interaction.options.getString('choice5');
 
         if (pollMethod === 'choice' && (!c1 || !c2)) {
-            return await interaction.editReply({ content: '❌ ボタン形式（choice）を選ぶ場合は、最低でも「選択肢1」と「選択肢2」を入力してください。' });
+            return await interaction.editReply({ content: '❌ ボタン形式を選ぶ場合は、最低でも選択肢1と選択肢2を入力してください。' });
         }
 
         const durationMs = parseDuration(durationInput);
         if (durationMs === false) {
-            return await interaction.editReply({ content: '❌ 期限の書式が正しくありません。「30m」「1h」「2d」のように半角英数字で入力してください。' });
+            return await interaction.editReply({ content: '❌ 期限の書式が正しくありません。「30m」「1h」のように入力してください。' });
         }
 
         const endTime = durationMs ? Date.now() + durationMs : null;
@@ -89,14 +85,14 @@ module.exports = {
             }
 
             if (pollType === 'hidden' && !isRevealed) {
-                embed.setTitle('投票受付中！').setColor('#e67e22');
+                embed.setTitle('🔒 シークレット投票受付中！').setColor('#e67e22');
                 if (pollMethod === 'choice') {
                     desc += `1️⃣ **${c1}** ： 🔒 投票中...\n2️⃣ **${c2}** ： 🔒 投票中...\n`;
                     if (c3) desc += `3️⃣ **${c3}** ： 🔒 投票中...\n`;
                     if (c4) desc += `4️⃣ **${c4}** ： 🔒 投票中...\n`;
                     if (c5) desc += `5️⃣ **${c5}** ： 🔒 投票中...\n`;
                 } else {
-                    desc += `*自由入力形式の入れた票が隠される投票です。*\n*現在登録されている選択肢も含めてすべて隠されています。*`;
+                    desc += `*自由入力形式のシークレット投票です。選択肢は開票まで隠されています。*`;
                 }
                 const totalVotes = Object.values(votes).reduce((sum, arr) => sum + arr.length, 0);
                 embed.setDescription(desc).setFooter({ text: isClosed ? '受付終了' : `現在合計: ${totalVotes} 票 | 作成者が「開票」を押すと結果が出ます` });
@@ -104,7 +100,7 @@ module.exports = {
                 if (pollType === 'hidden') {
                     embed.setTitle('🔓 アンケート開票結果！').setColor('#2ecc71');
                 } else {
-                    embed.setTitle(isClosed ? '🏁 アンケート結果発表！' : (pollMethod === 'choice' ? '📢 アンケート投票受付中！' : '📝 入力アンケート受付中！')).setColor(isClosed ? '#2ecc71' : (pollMethod === 'choice' ? '#9b59b6' : '#34495e'));
+                    embed.setTitle(isClosed ? '🏁 アンケート結果発表！' : (pollMethod === 'choice' ? '📢 アンケート投票受付中！' : '📝 自由入力型アンケート受付中！')).setColor(isClosed ? '#2ecc71' : (pollMethod === 'choice' ? '#9b59b6' : '#34495e'));
                 }
 
                 if (pollMethod === 'choice') {
@@ -115,12 +111,12 @@ module.exports = {
                 } else {
                     const items = Object.entries(votes);
                     if (items.length === 0) {
-                        desc += '*まだ選択肢がありません。下のボタンからあなたの意見を自由に追加してください。*';
+                        desc += '*まだ選択肢がありません。下のボタンから意見を追加してね！*';
                     } else {
                         items.forEach(([word, voters], index) => { desc += `${index + 1}. **${word}** ： **${voters.length} 票**\n`; });
                     }
                 }
-                embed.setDescription(desc).setFooter({ text: isClosed ? '投票は締め切られました' : 'ボタンを押して投票・入力（選び直し可能です）' });
+                embed.setDescription(desc).setFooter({ text: isClosed ? '投票は締め切られました' : 'ボタンを押して投票・入力してね（選び直し可能です）' });
             }
             return embed;
         };
@@ -137,7 +133,7 @@ module.exports = {
             rows.push(row);
         } else {
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('m_free_btn').setLabel('➕ 追加・投票する').setStyle(ButtonStyle.Primary)
+                new ButtonBuilder().setCustomId('m_free_btn').setLabel('➕ 言葉を追加・投票する').setStyle(ButtonStyle.Primary)
             );
             rows.push(row);
         }
@@ -149,17 +145,13 @@ module.exports = {
             rows.push(controlRow);
         }
 
-        // 🟢 アンケート本体を指定された「送信先チャンネル（targetChannel）」へ投稿！
         const replyMessage = await targetChannel.send({ embeds: [generateEmbed()], components: rows });
-        
-        // コマンド実行元の管理者画面には成功メッセージをコッソリ通知
         await interaction.editReply({ content: `✅ <#${targetChannel.id}> にアンケートを送信しました！` });
 
-        // 回答ログ転送用の関数
         const sendLogMessage = async (user, detailText) => {
             if (!logChannel) return;
             const logEmbed = new EmbedBuilder()
-                .setTitle('📥 新しい投票を受付けました')
+                .setTitle('📥 新しい投票（回答）を受付ました')
                 .setDescription(`👤 投票者: <@${user.id}>\n📋 内容: ${detailText}`)
                 .setColor('#2980b9')
                 .setTimestamp();
@@ -183,20 +175,16 @@ module.exports = {
                 if (logChannel) await logChannel.send({ content: `🔓 アンケート「**${question}**」が作成者によって開票されました！` }).catch(() => {});
                 return await btnInteraction.update({ embeds: [generateEmbed()], components: [] });
             }
-            if (btnInteraction.customId.includes('free')) {
-                const modal = new ModalBuilder()
-                    .setCustomId(`m-modal-${replyMessage.id}`)
-                    .setTitle('アンケートへの入力');
 
+            if (btnInteraction.customId === 'm_free_btn') {
+                const modal = new ModalBuilder().setCustomId(`m_modal_${replyMessage.id}`).setTitle('アンケートへの入力');
                 const textInput = new TextInputBuilder()
                     .setCustomId('m_text_field')
                     .setLabel('追加または投票したい言葉を入力（20文字以内）')
-                    .setPlaceholder('例: Discord, 1000 票')
+                    .setPlaceholder('例: 焼き肉 / カレー などの言葉を入力')
                     .setStyle(TextInputStyle.Short)
                     .setMaxLength(20)
-                    .setRequired(true);
-
-                modal.addComponents(new ActionRowBuilder().addComponents(textInput));
+                                modal.addComponents(new ActionRowBuilder().addComponents(textInput));
                 return await btnInteraction.showModal(modal);
             }
 
@@ -210,7 +198,6 @@ module.exports = {
             if (votes[selectNum]) votes[selectNum].push(voterId);
 
             await btnInteraction.update({ embeds: [generateEmbed()] });
-            
             await sendLogMessage(btnInteraction.user, `選択肢 [ ${selectNum} ] **${choiceText}** に投票しました。`);
         });
 
@@ -221,7 +208,7 @@ module.exports = {
                 if (pollType === 'hidden') isRevealed = true;
                 await replyMessage.edit({ embeds: [generateEmbed()], components: [] }).catch(() => {});
                 if (logChannel) {
-                    await logChannel.send({ content: `🛑 アンケート「**${question}**」は期限切れのため、回答受付を締め切りました。` }).catch(() => {});
+                    await logChannel.send({ content: `🛑 アンケート「**${question}**」は期限切れのため締め切りました。` }).catch(() => {});
                 }
                 interaction.client.off('interactionCreate', modalListener);
             }
@@ -230,9 +217,11 @@ module.exports = {
         // 📝 自由入力（文字ポップアップ）が送信されたときの処理
         const modalListener = async (modalInteraction) => {
             if (isClosed) return;
-            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m-modal-${replyMessage.id}`) return;
-            
-            await modalInteraction.deferUpdate();
+            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m_modal_${replyMessage.id}`) return;
+
+            // 🟢 返答を3秒以内に引き延ばす専用の命令（これでエラーが100%直ります）
+            await modalInteraction.deferReply({ ephemeral: true });
+
             const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
             const voterId = modalInteraction.user.id;
 
@@ -248,9 +237,12 @@ module.exports = {
                 for (const key in votes) { 
                     if (votes[key].length === 0) delete votes[key]; 
                 }
+
                 await replyMessage.edit({ embeds: [generateEmbed()] });
-                
                 await sendLogMessage(modalInteraction.user, `新しい言葉 **「${inputWord}」** を入力して投票しました。`);
+                
+                // 本人にだけ完了通知を表示します
+                await modalInteraction.editReply({ content: `✅ **「${inputWord}」** をアンケートに追加し、投票しました！` });
             }
         };
 

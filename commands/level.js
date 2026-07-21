@@ -1,8 +1,7 @@
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 
-// 📊 グラフの数式（二次関数）に基づいて、そのレベルに必要なメッセージ数を返す関数
+// グラフの数式（二次関数）に基づいて、そのレベルに必要なメッセージ数を返す関数
 function getRequiredMessages(level) {
-    // レベルが上がるにつれて放物線を描くように必要数が増えていきます
     return Math.floor(10 + (level * level * 2));
 }
 
@@ -25,11 +24,14 @@ function getLevelInfo(totalCount) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('level')
-        .setDescription('あなたの現在のレベルとメッセージ数を確認します'),
+        .setDescription('指定したユーザーのレベルとメッセージ数を確認します')
+        .addUserOption(o => o.setName('user').setDescription('ユーザー（空欄なら自分）').setRequired(false)),
     
     async execute(interaction, pool) {
         const guildId = interaction.guild?.id;
-        const userId = interaction.user.id;
+        // 指定があればそのユーザー、指定がなければコマンド実行者を取得
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const userId = targetUser.id;
 
         const res = await pool.query("SELECT count FROM message_counts WHERE user_id = $1 AND guild_id = $2", [userId, guildId]);
         const totalCount = res.rows.length > 0 ? res.rows[0].count : 0;
@@ -39,7 +41,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
             .setColor('#3498db')
-            .setTitle(`${interaction.user.username} さんのレベル情報`)
+            .setTitle(`${targetUser.username} さんのレベル情報`)
             .addFields(
                 { name: '🔥 現在のレベル', value: `${info.level}`, inline: true },
                 { name: '💬 総メッセージ数', value: `${totalCount} 回`, inline: true },

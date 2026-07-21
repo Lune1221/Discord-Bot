@@ -24,8 +24,7 @@ async function initDatabase() {
             PRIMARY KEY (user_id, guild_id)
         );
     `);
-}
-
+    
     // おみくじの日付を記録するテーブルを自動作成
     await pool.query(`
         CREATE TABLE IF NOT EXISTS omikuji_cooldowns (
@@ -35,6 +34,7 @@ async function initDatabase() {
             PRIMARY KEY (user_id, guild_id)
         );
     `);
+}
 
 const client = new Client({
     intents: [

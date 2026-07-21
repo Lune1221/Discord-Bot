@@ -42,7 +42,9 @@ if (fs.existsSync(foldersPath)) {
 client.once('ready', async () => {
     await initDatabase();
     console.log(`${client.user.tag} でログインしました！`);
-
+    
+    const serverCount = client.guilds.cache.size;
+    client.user.setActivity(`${serverCount} 個のサーバー`, { type: ActivityType.Watching });
     // Discordへスラッシュコマンドを自動登録する処理
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
@@ -53,7 +55,7 @@ client.once('ready', async () => {
             Routes.applicationCommands(CLIENT_ID),
             { body: commandsData },
         );
-        console.log('✨ スラッシュコマンドの登録が完了しました！');
+        console.log(' スラッシュコマンドの登録が完了しました！');
     } catch (error) {
         console.error('コマンド登録エラー:', error);
     }

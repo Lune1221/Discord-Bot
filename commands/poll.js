@@ -19,7 +19,7 @@ function parseDuration(str) {
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('poll')
-        .setDescription('高機能なアンケート（投票）を作成します')
+        .setDescription('アンケートを作成します')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(o => o.setName('question').setDescription('アンケートの質問内容を入力してください').setRequired(true))
         .addStringOption(o => o.setName('type').setDescription('結果の表示形式を選んでください').setRequired(true)
@@ -85,7 +85,7 @@ module.exports = {
             }
 
             if (pollType === 'hidden' && !isRevealed) {
-                embed.setTitle('🔒 シークレット投票受付中！').setColor('#e67e22');
+                embed.setTitle('投票受付中').setColor('#e67e22');
                 if (pollMethod === 'choice') {
                     desc += `1️⃣ **${c1}** ： 🔒 投票中...\n2️⃣ **${c2}** ： 🔒 投票中...\n`;
                     if (c3) desc += `3️⃣ **${c3}** ： 🔒 投票中...\n`;

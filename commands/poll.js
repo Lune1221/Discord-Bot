@@ -231,7 +231,7 @@ module.exports = {
         // 📝 自由入力（文字ポップアップ）が送信されたときの処理
         const modalListener = async (modalInteraction) => {
             if (isClosed) return;
-            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m_modal_${replyMessage.id}`) return;
+            if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m-modal_${replyMessage.id}`) return;
             
             await modalInteraction.deferUpdate();
             const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();

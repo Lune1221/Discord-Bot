@@ -1,7 +1,5 @@
-// Node.jsに対して、強制的にIPv4の道路を使わせる命令
 require('dns').setDefaultResultOrder('ipv4first');
 
-// Renderのスリープを防ぐためのWebサーバー設定
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
@@ -43,43 +41,44 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const commands = [
     new SlashCommandBuilder()
         .setName('count')
-        .setDescription('指定したユーザー（未指定ならあなた）の発言数を表示します')
+        .setDescription('指定したユーザーの発言数を表示します')
         .addUserOption(option => 
             option
                 .setName('user')
-                .setDescription('発言数を見たいユーザーを選んでください（空欄なら自分）')
+                .setDescription('発言回数を見たいユーザーを選んでください（空欄なら自分）')
                 .setRequired(false)
         ),
     new SlashCommandBuilder()
         .setName('ranking')
-        .setDescription('このサーバーの発言数ランキングを表示します（ページ切り替え機能付き）'),
+        .setDescription('このサーバーの発言数ランキングを表示します'),
     new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('【管理者専用】過去のメッセージをすべて遡って集計します（最初の1回のみ実行）')
+        .setDescription('【管理者専用】過去のメッセージを遡って集計します（最初の1回のみ実行）')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     new SlashCommandBuilder()
         .setName('omikuji')
-        .setDescription('おみくじを引きます（1日1回限定）')
-
+        .setDescription('今日のおみくじを引きます')
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);
 
-// おみくじリスト
-const omikujiResults = ['大吉 ', '中吉 ', '小吉 ', '吉 ', '凶 '];
+const omikujiResults = [
+    '大吉 ', 
+    '中吉 ', '中吉 ', 
+    '小吉 ', '小吉 ', 
+    '吉 ', '吉 ', '吉 ',
+    '凶 ', '凶 '
+];
 
-
-// 🟢 サーバー数をステータス欄に自動セットする関数（新機能）
 function updateServerCountStatus() {
     const serverCount = client.guilds.cache.size;
     client.user.setActivity({
         name: `${serverCount} 個のサーバーで稼働中`,
-        type: ActivityType.Competing // 「〜に参戦中」のステータス形式になります
+        type: ActivityType.Competing
     });
     console.log(`ステータスを更新しました: ${serverCount}個のサーバーで稼働中`);
 }
 
-// 過去のメッセージを一括スキャンしてSupabaseに保存する関数
 async function fetchAllMessages(guild) {
     console.log(`[${guild.name}] の過去メッセージをスキャン中...`);
     const textChannels = guild.channels.cache.filter(c => c.isTextBased());
@@ -110,7 +109,7 @@ async function fetchAllMessages(guild) {
         }
     }
 
-    console.log('サーバーへデータを一括送信中...');
+    console.log('Supabaseへデータを一括送信中...');
     const queryText = `
         INSERT INTO message_counts (user_id, guild_id, count) 
         VALUES ($1, $2, $3)
@@ -132,14 +131,12 @@ client.once('ready', async () => {
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
         console.log('スラッシュコマンドの登録が完了しました！');
         
-        // 🟢 起動した瞬間にサーバー数をステータスに反映します
         updateServerCountStatus();
     } catch (error) {
         console.error(error);
     }
 });
 
-// 🟢 新しいサーバーに参加した時、または退出した時にもステータスを自動更新（新機能）
 client.on('guildCreate', () => updateServerCountStatus());
 client.on('guildDelete', () => updateServerCountStatus());
 
@@ -205,7 +202,7 @@ async function generateRankingPage(guild, currentPageId, currentUserId, executor
     }
 
     const embed = new EmbedBuilder()
-        .setTitle(`🏆 発言数ランキング (${page} / ${maxPages} ページ)`)
+        .setTitle(`🏆 発言回数ランキング (${page} / ${maxPages} ページ)`)
         .setDescription(rankingText)
         .setColor('#FFD700')
         .addFields({ name: '👤 あなたの現在の順位', value: `**${myRank}** (${myCount}回)`, inline: false })
@@ -231,7 +228,6 @@ client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
 
-     /count コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'count') {
         await interaction.deferReply();
         
@@ -243,8 +239,6 @@ client.on('interactionCreate', async (interaction) => {
             [userId, guildId]
         );
         const rows = res.rows;
-        
-        // 🟢 配列の1件目を安全に取り出すため、rows[0].count にきれいに修正しました
         const count = rows.length > 0 ? rows[0].count : 0;
         
         const embed = new EmbedBuilder()
@@ -256,24 +250,6 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: [embed] });
     }
 
-         /omikuji コマンドの処理（結果のみバージョン）
-    if (interaction.isChatInputCommand() && interaction.commandName === 'omikuji') {
-        await interaction.deferReply();
-
-        // リストからランダムに1つ選ぶ
-        const randomFortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
-
-        const embed = new EmbedBuilder()
-            .setTitle('おみくじ結果')
-            .setDescription(`<@${interaction.user.id}> さんの今日のおみくじ結果は...`)
-            .addFields({ name: '【運勢】', value: `**${randomFortune}**`, inline: false })
-            .setColor('#ff4757') // おみくじっぽい鮮やかな赤色
-            .setTimestamp();
-
-        await interaction.editReply({ embeds: [embed] });
-    }
-
-     /ranking コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'ranking') {
         await interaction.deferReply();
         await interaction.guild.members.fetch();
@@ -286,10 +262,9 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ embeds: pageData.embeds, components: pageData.components });
     }
 
-    // 3. /scan コマンドの処理
     if (interaction.isChatInputCommand() && interaction.commandName === 'scan') {
         await interaction.deferReply({ ephemeral: true });
-        await interaction.editReply({ content: '過去のメッセージをすべてサーバーにスキャン、同期しています...' });
+        await interaction.editReply({ content: '過去のメッセージをすべてサーバーにスキャン・同期しています...' });
         
         await interaction.guild.members.fetch();
         await fetchAllMessages(interaction.guild);
@@ -297,23 +272,23 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: '✅ 過去ログのスキャンとサーバーへの保存が完全に完了しました！' });
     }
 
-    // 4. ボタン（「前へ」「次へ」）が押されたときの処理
+    if (interaction.isChatInputCommand() && interaction.commandName === 'omikuji') {
+        await interaction.deferReply();
+
+        const randomFortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
+
+        const embed = new EmbedBuilder()
+            .setTitle(' おみくじ結果')
+            .setDescription(`<@${interaction.user.id}> さんの今日のおみくじ結果は...`)
+            .addFields({ name: '【運勢】', value: `**${randomFortune}**`, inline: false })
+            .setColor('#ff4757')
+            .setTimestamp();
+
+        await interaction.editReply({ embeds: [embed] });
+    }
+
     if (interaction.isButton()) {
         const [action, pageStr, executorId] = interaction.customId.split('_');
         
         if (interaction.user.id !== executorId) {
             return await interaction.reply({
-                content: '❌ このボタンはコマンドを実行した本人しか操作できません。',
-                ephemeral: true
-            });
-        }
-
-        let page = parseInt(pageStr, 10);
-        if (action === 'prev') page--;
-        if (action === 'next') page++;
-
-        const pageData = await generateRankingPage(interaction.guild, page, interaction.user.id, executorId);
-        await interaction.update({ embeds: pageData.embeds, components: pageData.components });
-    }});
-
-client.login(TOKEN);

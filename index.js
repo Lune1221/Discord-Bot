@@ -2,7 +2,7 @@ require('dns').setDefaultResultOrder('ipv4first');
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
+app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
@@ -16,8 +16,6 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejec
 async function initDatabase() {
     await pool.query(`CREATE TABLE IF NOT EXISTS message_counts (user_id TEXT, guild_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS omikuji_cooldowns (user_id TEXT, guild_id TEXT, last_date TEXT, PRIMARY KEY (user_id, guild_id));`);
-    
-    // 通知チャンネル設定を保存するテーブル
     await pool.query(`CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, level_channel_id TEXT);`);
 }
 
@@ -39,13 +37,30 @@ if (fs.existsSync(foldersPath)) {
     }
 }
 
+// 📊 グラフの数式（二次関数）
+function getRequiredMessages(level) {
+    return Math.floor(10 + (level * level * 2));
+}
+
+function getLevelInfo(totalCount) {
+    let level = 0;
+    let count = totalCount;
+
+    while (true) {
+        let required = getRequiredMessages(level);
+        if (count >= required) {
+            count -= required;
+            level++;
+        } else {
+            return { level, current: count, required: required };
+        }
+    }
+}
+
 client.once('ready', async () => {
     await initDatabase();
     console.log(`${client.user.tag} でログインしました！`);
-    
-    const serverCount = client.guilds.cache.size;
-    client.user.setActivity(`${serverCount} 個のサーバー`, { type: ActivityType.Watching });
-    // Discordへスラッシュコマンドを自動登録する処理
+
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         console.log('スラッシュコマンドの登録を開始します...');
@@ -55,17 +70,15 @@ client.once('ready', async () => {
             Routes.applicationCommands(CLIENT_ID),
             { body: commandsData },
         );
-        console.log(' スラッシュコマンドの登録が完了しました！');
+        console.log('✨ スラッシュコマンドの登録が完了しました！');
     } catch (error) {
         console.error('コマンド登録エラー:', error);
     }
 });
 
-// メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     try {
-        // 1. カウントを更新しつつ、更新後のカウントを取得する (RETURNING count)
         const query = `
             INSERT INTO message_counts (user_id, guild_id, count) 
             VALUES ($1, $2, 1) 
@@ -76,22 +89,16 @@ client.on('messageCreate', async (message) => {
         const res = await pool.query(query, [message.author.id, message.guild.id]);
         const newCount = res.rows[0].count;
 
-        // 2. レベル計算（例：10メッセージごとに1レベル）
-        const oldLevel = Math.floor((newCount - 1) / 10);
-        const newLevel = Math.floor(newCount / 10);
+        const oldInfo = getLevelInfo(newCount - 1);
+        const newInfo = getLevelInfo(newCount);
 
-        // 3. レベルが上がっていた場合、通知を送る
-        if (newLevel > oldLevel) {
-            // サーバーごとの通知チャンネル設定を取得
+        if (newInfo.level > oldInfo.level) {
             const settingRes = await pool.query(
                 `SELECT level_channel_id FROM guild_settings WHERE guild_id = $1`,
                 [message.guild.id]
             );
 
-            // デフォルトは今メッセージが投稿されたチャンネル
             let targetChannel = message.channel; 
-
-            // 設定チャンネルが保存されていればそちらを優先
             if (settingRes.rows.length > 0 && settingRes.rows[0].level_channel_id) {
                 const fetchedChannel = message.guild.channels.cache.get(settingRes.rows[0].level_channel_id);
                 if (fetchedChannel) {
@@ -99,8 +106,7 @@ client.on('messageCreate', async (message) => {
                 }
             }
 
-            // お祝いメッセージを送信
-            await targetChannel.send(`🎉  ${message.author} おめでとうございます！レベル **${newLevel}** にアップしました！`);
+            await targetChannel.send(`🎉  ${message.author} おめでとうございます！レベル **${newInfo.level}** にアップしました！`);
         }
     } catch (e) { 
         console.error(e); 

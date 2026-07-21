@@ -3,7 +3,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('scan')
-        .setDescription('過去のメッセージを遡って集計します')
+        .setDescription('過去のメッセージを遡って集計します【管理者権限】')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
     async execute(interaction, pool) {
         await interaction.editReply({ content: 'スキャン中...' });

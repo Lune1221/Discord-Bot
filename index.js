@@ -26,6 +26,16 @@ async function initDatabase() {
     `);
 }
 
+    // おみくじの日付を記録するテーブルを自動作成
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS omikuji_cooldowns (
+            user_id TEXT,
+            guild_id TEXT,
+            last_date TEXT,
+            PRIMARY KEY (user_id, guild_id)
+        );
+    `);
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -272,20 +282,50 @@ client.on('interactionCreate', async (interaction) => {
         await interaction.editReply({ content: '✅ 過去ログのスキャンとサーバーへの保存が完全に完了しました！' });
     }
 
+    // 5. /omikuji コマンドの処理（1日1回限定版）
     if (interaction.isChatInputCommand() && interaction.commandName === 'omikuji') {
         await interaction.deferReply();
 
-        const randomFortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
+        const userId = interaction.user.id;
+        // 今日の日付を「2026-07-21」のような文字の形で作る
+        const todayStr = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+
+        // 🟢 データベースから、この人が最後に引いた日付を取得する
+        const cooldownRes = await pool.query(
+            "SELECT last_date FROM omikuji_cooldowns WHERE user_id = $1 AND guild_id = $2",
+            [userId, guildId]
+        );
+
+        // 🟢 もし最後に引いた日が「今日」と同じなら、おみくじを拒否する
+        if (cooldownRes.rows.length > 0 && cooldownRes.rows[0].last_date === todayStr) {
+            const embedError = new EmbedBuilder()
+                .setTitle('❌ おみくじは1日1回まで')
+                .setDescription('今日のおみくじは既に引いています！また明日引いてね！')
+                .setColor('#ff4757')
+                .setTimestamp();
+            return await interaction.editReply({ embeds: [embedError] });
+        }
+
+        // まだ引いていなければ、ランダムで結果を選ぶ
+        const fortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
+
+        // 🟢 今日の日付をデータベースに保存（上書き）する
+        await pool.query(`
+            INSERT INTO omikuji_cooldowns (user_id, guild_id, last_date)
+            VALUES ($1, $2, $3)
+            ON CONFLICT(user_id, guild_id) DO UPDATE SET last_date = $3
+        `, [userId, guildId, todayStr]);
 
         const embed = new EmbedBuilder()
-            .setTitle(' おみくじ結果')
-            .setDescription(`<@${interaction.user.id}> さんの今日のおみくじ結果は...`)
-            .addFields({ name: '【運勢】', value: `**${randomFortune}**`, inline: false })
+            .setTitle('おみくじ結果')
+            .setDescription(`<@${interaction.user.id}> さんの今日の運勢は...`)
+            .addFields({ name: '【運勢】', value: `**${fortune}**` })
             .setColor('#ff4757')
             .setTimestamp();
 
         await interaction.editReply({ embeds: [embed] });
     }
+
 
     if (interaction.isButton()) {
         const [action, pageStr, executorId] = interaction.customId.split('_');

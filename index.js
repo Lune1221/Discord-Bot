@@ -7,7 +7,8 @@ app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
 const { Pool } = require('pg');
-const fs = require('fs'); // 🟢 フォルダを自動で読み込むための標準パーツ
+const fs = require('fs');
+const path = require('path'); // 念のためpathの読み込みも記述
 require('dotenv').config();
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -16,55 +17,79 @@ async function initDatabase() {
     await pool.query(`CREATE TABLE IF NOT EXISTS message_counts (user_id TEXT, guild_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS omikuji_cooldowns (user_id TEXT, guild_id TEXT, last_date TEXT, PRIMARY KEY (user_id, guild_id));`);
     
-    // 🟢 追加: サーバーごとの通知チャンネル設定を保存するテーブル
+    // 🟢 【追加】通知チャンネル設定を保存するテーブル
     await pool.query(`CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, level_channel_id TEXT);`);
 }
-
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
-// 🟢 コマンドを保管する特製ボックスを作成
 client.commands = new Collection();
-const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
-const commandsData = [];
 
-for (const file of commandFiles) {
-    const command = require(`./commands/${file}`);
-    if (command.data && command.execute) {
-        client.commands.set(command.data.name, command);
-        commandsData.push(command.data.toJSON());
+const foldersPath = path.join(__dirname, 'commands');
+if (fs.existsSync(foldersPath)) {
+    const commandFiles = fs.readdirSync(foldersPath).filter(file => file.endsWith('.js'));
+    for (const file of commandFiles) {
+        const filePath = path.join(foldersPath, file);
+        const command = require(filePath);
+        if ('data' in command && 'execute' in command) {
+            client.commands.set(command.data.name, command);
+        }
     }
 }
 
-const rest = new REST({ version: '10' }).setToken(TOKEN);
-
-function updateServerCountStatus() {
-    const serverCount = client.guilds.cache.size;
-    client.user.setActivity({ name: `${serverCount} 個のサーバーで稼働中`, type: ActivityType.Competing });
-}
-
 client.once('ready', async () => {
-    try {
-        await initDatabase();
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commandsData });
-        updateServerCountStatus();
-        console.log(`${client.user.tag} 起動成功（完全モジュール化完了）`);
-    } catch (e) { console.error(e); }
+    await initDatabase();
+    console.log(`${client.user.tag} でログインしました！`);
 });
 
-client.on('guildCreate', () => updateServerCountStatus());
-client.on('guildDelete', () => updateServerCountStatus());
-
+// 🟢 【変更】メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     try {
-        await pool.query(`INSERT INTO message_counts (user_id, guild_id, count) VALUES ($1, $2, 1) ON CONFLICT(user_id, guild_id) DO UPDATE SET count = message_counts.count + 1`, [message.author.id, message.guild.id]);
-    } catch (e) { console.error(e); }
+        // 1. カウントを更新しつつ、更新後のカウントを取得する (RETURNING count)
+        const query = `
+            INSERT INTO message_counts (user_id, guild_id, count) 
+            VALUES ($1, $2, 1) 
+            ON CONFLICT(user_id, guild_id) 
+            DO UPDATE SET count = message_counts.count + 1 
+            RETURNING count;
+        `;
+        const res = await pool.query(query, [message.author.id, message.guild.id]);
+        const newCount = res.rows[0].count;
+
+        // 2. レベル計算（例：10メッセージごとに1レベル）
+        const oldLevel = Math.floor((newCount - 1) / 10);
+        const newLevel = Math.floor(newCount / 10);
+
+        // 3. レベルが上がっていた場合、通知を送る
+        if (newLevel > oldLevel) {
+            // サーバーごとの通知チャンネル設定を取得
+            const settingRes = await pool.query(
+                `SELECT level_channel_id FROM guild_settings WHERE guild_id = $1`,
+                [message.guild.id]
+            );
+
+            // デフォルトは今メッセージが投稿されたチャンネル
+            let targetChannel = message.channel; 
+
+            // 設定チャンネルが保存されていればそちらを優先
+            if (settingRes.rows.length > 0 && settingRes.rows[0].level_channel_id) {
+                const fetchedChannel = message.guild.channels.cache.get(settingRes.rows[0].level_channel_id);
+                if (fetchedChannel) {
+                    targetChannel = fetchedChannel;
+                }
+            }
+
+            // お祝いメッセージを送信
+            await targetChannel.send(`🎉 おめでとうございます ${message.author} さん！レベル **${newLevel}** にアップしました！`);
+        }
+    } catch (e) { 
+        console.error(e); 
+    }
 });
 
-// 🟢 スラッシュコマンド実行の自動割り振り処理
 client.on('interactionCreate', async (interaction) => {
     const guildId = interaction.guild?.id;
     if (!guildId) return;
@@ -75,14 +100,12 @@ client.on('interactionCreate', async (interaction) => {
 
         try {
             await interaction.deferReply({ ephemeral: interaction.commandName === 'scan' });
-            // 各ファイルの「execute」という命令を自動で呼び出します
             await command.execute(interaction, pool);
         } catch (error) {
             console.error(error);
         }
     }
 
-    // ランキングのボタン操作の処理
     if (interaction.isButton()) {
         const [action, pageStr, executorId] = interaction.customId.split('_');
         if (interaction.user.id !== executorId) { return await interaction.reply({ content: '❌ 本人しか操作できません。', ephemeral: true }); }
@@ -91,8 +114,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!rankingCommand) return;
         
         let page = parseInt(pageStr, 10) + (action === 'prev' ? -1 : 1);
-        const pageData = await rankingCommand.generatePage(interaction.guild, page, interaction.user.id, executorId, pool);
-        await interaction.update({ embeds: pageData.embeds, components: pageData.components });
+        await rankingCommand.executeButton(interaction, pool, page, executorId);
     }
 });
 

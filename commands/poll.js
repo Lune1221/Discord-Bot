@@ -5,7 +5,7 @@ function parseDuration(str) {
     const match = str.match(/^(\d+)([mhdwy])$/);
     if (!match) return false;
     const value = parseInt(match, 10);
-    const unit = match;
+    const unit = match[2];
     switch (unit) {
         case 'm': return value * 60 * 1000;
         case 'h': return value * 60 * 60 * 1000;
@@ -166,6 +166,7 @@ module.exports = {
         collector.on('collect', async (btnInteraction) => {
             const voterId = btnInteraction.user.id;
 
+            // 🟢 開票ボタンの処理（確実に最優先で判定させます）
             if (btnInteraction.customId === 'm_reveal_btn') {
                 if (voterId !== creatorId) {
                     return await btnInteraction.reply({ content: '❌ このアンケートを開票できるのは作成者本人だけです。', ephemeral: true });
@@ -176,6 +177,7 @@ module.exports = {
                 return await btnInteraction.update({ embeds: [generateEmbed()], components: [] });
             }
 
+            // 自由入力ボタンの処理
             if (btnInteraction.customId === 'm_free_btn') {
                 const modal = new ModalBuilder().setCustomId(`m_modal_${replyMessage.id}`).setTitle('アンケートへの入力');
                 const textInput = new TextInputBuilder()
@@ -183,25 +185,27 @@ module.exports = {
                     .setLabel('追加または投票したい言葉を入力（20文字以内）')
                     .setPlaceholder('例: 焼き肉 / カレー などの言葉を入力')
                     .setStyle(TextInputStyle.Short)
-                    .setMaxLength(20)
                                 modal.addComponents(new ActionRowBuilder().addComponents(textInput));
                 return await btnInteraction.showModal(modal);
             }
 
-            // 🔘 通常の選択肢ボタンが押されたとき
-            const selectNum = parseInt(btnInteraction.customId.split('_')[2], 10);
-            const choiceText = selectNum === 1 ? c1 : selectNum === 2 ? c2 : selectNum === 3 ? c3 : selectNum === 4 ? c4 : c5;
+            // 🟢 通常の数字ボタンの処理
+            if (btnInteraction.customId.startsWith('m_vote_')) {
+                // 配列の3番目[2]から正しく数値（1〜5）を取り出します
+                const selectNum = parseInt(btnInteraction.customId.split('_')[2], 10);
+                const choiceText = selectNum === 1 ? c1 : selectNum === 2 ? c2 : selectNum === 3 ? c3 : selectNum === 4 ? c4 : c5;
 
-            for (const key in votes) { 
-                votes[key] = votes[key].filter(id => id !== voterId); 
+                for (const key in votes) { 
+                    votes[key] = votes[key].filter(id => id !== voterId); 
+                }
+                if (votes[selectNum]) votes[selectNum].push(voterId);
+
+                await btnInteraction.update({ embeds: [generateEmbed()] });
+                await sendLogMessage(btnInteraction.user, `選択肢 [ ${selectNum} ] **${choiceText}** に投票しました。`);
             }
-            if (votes[selectNum]) votes[selectNum].push(voterId);
-
-            await btnInteraction.update({ embeds: [generateEmbed()] });
-            await sendLogMessage(btnInteraction.user, `選択肢 [ ${selectNum} ] **${choiceText}** に投票しました。`);
         });
 
-        // ⏳ 投票期限終了の処理
+        // ⏳ 期限切れ（タイマー終了）になったときの処理
         collector.on('end', async () => {
             if (durationMs) {
                 isClosed = true;
@@ -210,18 +214,16 @@ module.exports = {
                 if (logChannel) {
                     await logChannel.send({ content: `🛑 アンケート「**${question}**」は期限切れのため締め切りました。` }).catch(() => {});
                 }
-                interaction.client.off('interactionCreate', modalListener);
             }
+            interaction.client.off('interactionCreate', modalListener);
         });
 
         // 📝 自由入力（文字ポップアップ）が送信されたときの処理
         const modalListener = async (modalInteraction) => {
             if (isClosed) return;
             if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m_modal_${replyMessage.id}`) return;
-
-            // 🟢 返答を3秒以内に引き延ばす専用の命令（これでエラーが100%直ります）
+            
             await modalInteraction.deferReply({ ephemeral: true });
-
             const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
             const voterId = modalInteraction.user.id;
 
@@ -237,11 +239,9 @@ module.exports = {
                 for (const key in votes) { 
                     if (votes[key].length === 0) delete votes[key]; 
                 }
-
+                
                 await replyMessage.edit({ embeds: [generateEmbed()] });
                 await sendLogMessage(modalInteraction.user, `新しい言葉 **「${inputWord}」** を入力して投票しました。`);
-                
-                // 本人にだけ完了通知を表示します
                 await modalInteraction.editReply({ content: `✅ **「${inputWord}」** をアンケートに追加し、投票しました！` });
             }
         };

@@ -1,30 +1,30 @@
-const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ModalBuilder, TextInputBuilder, TextInputStyle, PermissionFlagsBits, ChannelType } = require('discord.js');
 
 function parseDuration(str) {
-    if (!str) return 86400000;
+    if (!str) return null; // 空欄なら期限なし
     const match = str.match(/^(\d+)([mhdwy])$/);
-    if (!match) return null;
-    const value = parseInt(match[1], 10);
-    const unit = match[2];
+    if (!match) return false; // 書式エラー用
+    const value = parseInt(match, 10);
+    const unit = match;
     switch (unit) {
         case 'm': return value * 60 * 1000;
         case 'h': return value * 60 * 60 * 1000;
         case 'd': return value * 24 * 60 * 60 * 1000;
         case 'w': return value * 7 * 24 * 60 * 60 * 1000;
         case 'y': return value * 365 * 24 * 60 * 60 * 1000;
-        default: return null;
+        default: return false;
     }
 }
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('poll')
-        .setDescription('高機能なアンケート（投票）を作成します')
+        .setDescription('アンケート（投票）を作成します')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
         .addStringOption(o => o.setName('question').setDescription('アンケートの質問・お題内容を入力してください').setRequired(true))
         .addStringOption(o => o.setName('type').setDescription('結果の表示形式を選んでください').setRequired(true)
             .addChoices(
-                { name: '🔓 通常（いつでも結果が見える）', value: 'open' },
+                { name: '🔓 通常（結果が見える）', value: 'open' },
                 { name: '🔒 シークレット（最後に開票する）', value: 'hidden' }
             ))
         .addStringOption(o => o.setName('method').setDescription('投票の形式を選んでください').setRequired(true)
@@ -32,7 +32,10 @@ module.exports = {
                 { name: '🔘 ボタン（決まった選択肢から選ぶ）', value: 'choice' },
                 { name: '📝 自由入力（文字を直接入力して追加する）', value: 'input' }
             ))
-        .addStringOption(o => o.setName('duration').setDescription('期限を入力（例: 30m, 1h, 1d, 1y）空欄なら24時間').setRequired(false))
+        // 🟢 アンケートを送信するチャンネルを指定できるオプション（テキストチャンネル限定）
+        .addChannelOption(o => o.setName('channel').setDescription('アンケートを送るチャンネルを選んでください（空欄ならこの画面）').addChannelTypes(ChannelType.GuildText).setRequired(false))
+        // 🟢 期限オプション（空欄なら期限なしになります）
+        .addStringOption(o => o.setName('duration').setDescription('期限（例: 30m, 1h, 1d）空欄なら期限なし（無制限）').setRequired(false))
         .addStringOption(o => o.setName('choice1').setDescription('選択肢1（ボタン形式の時のみ入力）').setRequired(false))
         .addStringOption(o => o.setName('choice2').setDescription('選択肢2（ボタン形式の時のみ入力）').setRequired(false))
         .addStringOption(o => o.setName('choice3').setDescription('選択肢3（省略可能）').setRequired(false))
@@ -46,6 +49,8 @@ module.exports = {
         const pollType = interaction.options.getString('type');
         const pollMethod = interaction.options.getString('method');
         const durationInput = interaction.options.getString('duration');
+        // 🟢 指定されたチャンネルを取得
+        const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
 
         const c1 = interaction.options.getString('choice1');
         const c2 = interaction.options.getString('choice2');
@@ -57,13 +62,14 @@ module.exports = {
             return await interaction.editReply({ content: '❌ ボタン形式（choice）を選ぶ場合は、最低でも「選択肢1」と「選択肢2」を入力してください。' });
         }
 
+        // 期限の計算（空欄なら期限なし、書式エラーなら弾く）
         const durationMs = parseDuration(durationInput);
-        if (durationMs === null) {
-            return await interaction.editReply({ content: '❌ 期限の書式が正しくありません。「30m」「1h」「2d」「1y」のように半角英数字で入力してください。' });
+        if (durationMs === false) {
+            return await interaction.editReply({ content: '❌ 期限の書式が正しくありません。「30m」「1h」「2d」のように半角英数字で入力してください。' });
         }
 
-        const endTime = Date.now() + durationMs;
-        const endTimestampStr = `<t:${Math.floor(endTime / 1000)}:R>`;
+        const endTime = durationMs ? Date.now() + durationMs : null;
+        const endTimestampStr = endTime ? `<t:${Math.floor(endTime / 1000)}:R>` : 'なし（無制限）';
 
         const votes = pollMethod === 'choice' ? { 1: [], 2: [], 3: [], 4: [], 5: [] } : {};
         let isRevealed = false;
@@ -95,7 +101,7 @@ module.exports = {
                 if (pollType === 'hidden') {
                     embed.setTitle('🔓 アンケート開票結果！').setColor('#2ecc71');
                 } else {
-                    embed.setTitle(isClosed ? '🏁 アンケート結果発表！' : (pollMethod === 'choice' ? '📢 アンケート投票受付中！' : '📝 自由入力型アンケート受付中！')).setColor(isClosed ? '#2ecc71' : (pollMethod === 'choice' ? '#9b59b6' : '#34495e'));
+                    embed.setTitle(isClosed ? '🏁 アンケート結果発表！' : (pollMethod === 'choice' ? '📢 投票受付中！' : '📝 アンケート受付中！')).setColor(isClosed ? '#2ecc71' : (pollMethod === 'choice' ? '#9b59b6' : '#34495e'));
                 }
 
                 if (pollMethod === 'choice') {
@@ -106,12 +112,12 @@ module.exports = {
                 } else {
                     const items = Object.entries(votes);
                     if (items.length === 0) {
-                        desc += '*まだ選択肢がありません。下のボタンからあなたの意見を自由に追加してね！*';
+                        desc += '*まだ選択肢がありません。下のボタンからあなたの意見を自由に追加してください！*';
                     } else {
                         items.forEach(([word, voters], index) => { desc += `${index + 1}. **${word}** ： **${voters.length} 票**\n`; });
                     }
                 }
-                embed.setDescription(desc).setFooter({ text: isClosed ? '投票は締め切られました' : 'ボタンを押して投票・入力してね（選び直し可能です）' });
+                embed.setDescription(desc).setFooter({ text: isClosed ? '投票は締め切られました' : 'ボタンを押して投票・入力（選び直し可能です）' });
             }
             return embed;
         };
@@ -128,7 +134,7 @@ module.exports = {
             rows.push(row);
         } else {
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('m_free_btn').setLabel('➕ 言葉を追加・投票する').setStyle(ButtonStyle.Primary)
+                new ButtonBuilder().setCustomId('m_free_btn').setLabel('➕ 追加・投票する').setStyle(ButtonStyle.Primary)
             );
             rows.push(row);
         }
@@ -140,8 +146,17 @@ module.exports = {
             rows.push(controlRow);
         }
 
-        const replyMessage = await interaction.editReply({ embeds: [generateEmbed()], components: rows });
-        const collector = replyMessage.createMessageComponentCollector({ componentType: ComponentType.Button, time: durationMs });
+        // 🟢 指定されたチャンネルにアンケート本体を直接投稿します
+        const replyMessage = await targetChannel.send({ embeds: [generateEmbed()], components: rows });
+        
+        // コマンドを実行した画面には、管理者宛てに完了通知を出します
+        await interaction.editReply({ content: `✅ <#${targetChannel.id}> にアンケートを正常に送信しました！` });
+
+        // タイマーの設定（期限なしなら最長の24時間を仮セットし、自動締め切りは行いません）
+        const collectorOptions = { componentType: ComponentType.Button };
+        if (durationMs) collectorOptions.time = durationMs;
+
+        const collector = replyMessage.createMessageComponentCollector(collectorOptions);
 
         collector.on('collect', async (btnInteraction) => {
             const voterId = btnInteraction.user.id;
@@ -169,20 +184,23 @@ module.exports = {
                 return await btnInteraction.showModal(modal);
             }
 
-            const selectNum = parseInt(btnInteraction.customId.split('_')[2], 10);
+            const selectNum = parseInt(btnInteraction.customId.split('_'), 10);
             for (const key in votes) { votes[key] = votes[key].filter(id => id !== voterId); }
-            votes[selectNum].push(voterId);
-
-            await btnInteraction.update({ embeds: [generateEmbed()] });
+            if (votes[selectNum]) votes[selectNum].push(voterId);
+                        await btnInteraction.update({ embeds: [generateEmbed()] });
         });
 
+        // 🟢 期限切れ（タイマー終了）になったときの処理
         collector.on('end', async () => {
-            isClosed = true;
-            if (pollType === 'hidden') isRevealed = true;
-            await replyMessage.edit({ embeds: [generateEmbed()], components: [] }).catch(() => {});
-            interaction.client.off('interactionCreate', modalListener);
+            if (durationMs) {
+                isClosed = true;
+                if (pollType === 'hidden') isRevealed = true;
+                await replyMessage.edit({ embeds: [generateEmbed()], components: [] }).catch(() => {});
+                interaction.client.off('interactionCreate', modalListener);
+            }
         });
 
+        // 🟢 自由入力（文字ポップアップ）が送信されたときの処理
         const modalListener = async (modalInteraction) => {
             if (isClosed) return;
             if (!modalInteraction.isModalSubmit() || modalInteraction.customId !== `m_modal_${replyMessage.id}`) return;
@@ -190,7 +208,8 @@ module.exports = {
             await modalInteraction.deferUpdate();
             const inputWord = modalInteraction.fields.getTextInputValue('m_text_field').trim();
             const voterId = modalInteraction.user.id;
-                     if (inputWord) {
+
+            if (inputWord) {
                 for (const key in votes) { 
                     votes[key] = votes[key].filter(id => id !== voterId); 
                 }

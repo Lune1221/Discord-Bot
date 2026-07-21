@@ -2,7 +2,7 @@ require('dns').setDefaultResultOrder('ipv4first');
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
+app.get('/', (req, res) => res.send('Botは24時間元気に稼働中です！'));
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
@@ -37,7 +37,7 @@ if (fs.existsSync(foldersPath)) {
     }
 }
 
-// 📊 グラフの数式（二次関数）
+// 📊 グラフの数式（二次関数）によるレベル計算
 function getRequiredMessages(level) {
     return Math.floor(10 + (level * level * 2));
 }
@@ -61,6 +61,11 @@ client.once('ready', async () => {
     await initDatabase();
     console.log(`${client.user.tag} でログインしました！`);
 
+    // 🟢 ボットのステータスに導入サーバー数を表示する設定
+    const serverCount = client.guilds.cache.size;
+    client.user.setActivity(`${serverCount} 個のサーバー`, { type: ActivityType.Watching });
+
+    // Discordへスラッシュコマンドを自動登録する処理
     const rest = new REST({ version: '10' }).setToken(TOKEN);
     try {
         console.log('スラッシュコマンドの登録を開始します...');
@@ -76,6 +81,7 @@ client.once('ready', async () => {
     }
 });
 
+// メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
     try {

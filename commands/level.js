@@ -43,9 +43,8 @@ module.exports = {
             .setColor('#3498db')
             .setTitle(`${targetUser.username} さんのレベル情報`)
             .addFields(
-                { name: '🔥 現在のレベル', value: `${info.level}`, inline: true },
-                { name: '💬 総メッセージ数', value: `${totalCount} 回`, inline: true },
-                { name: '📈 次のレベルまで', value: `あと ${remaining} メッセージ`, inline: false }
+                { name: ' 現在のレベル', value: `${info.level}`, inline: true },
+                { name: ' 次のレベルまで', value: `あと ${remaining} メッセージ`, inline: false }
             )
             .setTimestamp();
 

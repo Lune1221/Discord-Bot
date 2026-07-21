@@ -89,14 +89,14 @@ module.exports = {
             }
 
             if (pollType === 'hidden' && !isRevealed) {
-                embed.setTitle('🔒 シークレット投票受付中！').setColor('#e67e22');
+                embed.setTitle('投票受付中！').setColor('#e67e22');
                 if (pollMethod === 'choice') {
                     desc += `1️⃣ **${c1}** ： 🔒 投票中...\n2️⃣ **${c2}** ： 🔒 投票中...\n`;
                     if (c3) desc += `3️⃣ **${c3}** ： 🔒 投票中...\n`;
                     if (c4) desc += `4️⃣ **${c4}** ： 🔒 投票中...\n`;
                     if (c5) desc += `5️⃣ **${c5}** ： 🔒 投票中...\n`;
                 } else {
-                    desc += `*自由入力形式のシークレット投票です。*\n*現在登録されている選択肢も含めてすべて隠されています。*`;
+                    desc += `*自由入力形式の入れた票が隠される投票です。*\n*現在登録されている選択肢も含めてすべて隠されています。*`;
                 }
                 const totalVotes = Object.values(votes).reduce((sum, arr) => sum + arr.length, 0);
                 embed.setDescription(desc).setFooter({ text: isClosed ? '受付終了' : `現在合計: ${totalVotes} 票 | 作成者が「開票」を押すと結果が出ます` });

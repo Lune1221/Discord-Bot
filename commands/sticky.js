@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits, ChannelType } = 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('sticky')
-        .setDescription('指定したチャンネルにスティッキーメッセージを設定・解除します')
+        .setDescription('指定したチャンネルにスティッキーメッセージ（固定埋め込み）を設定・解除します')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
         .addSubcommand(sub =>
             sub.setName('set')
@@ -30,7 +30,6 @@ module.exports = {
 
     async execute(interaction, pool) {
         const subcommand = interaction.options.getSubcommand();
-        // チャンネルが指定されていればそのチャンネル、省略されていればコマンドを実行したチャンネル
         const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
         const channelId = targetChannel.id;
 
@@ -54,9 +53,7 @@ module.exports = {
                 try {
                     const oldMsg = await targetChannel.messages.fetch(res.rows[0].message_id);
                     if (oldMsg) await oldMsg.delete();
-                } catch (e) {
-                    // すでに削除されている場合は無視
-                }
+                } catch (e) {}
             }
 
             // 新しいスティッキーメッセージをターゲットチャンネルに送信
@@ -76,7 +73,8 @@ module.exports = {
                 DO UPDATE SET message_id = $2, title = $3, description = $4
             `, [channelId, sentMessage.id, title, description]);
 
-            await interaction.reply({ content: `✨ ${targetChannel} にスティッキーメッセージを設定しました！`, ephemeral: true });
+            // 💡 editReplyを使って「考え中...」を正常に完了させる
+            await interaction.editReply({ content: `✨ ${targetChannel} にスティッキーメッセージを設定しました！` });
 
         } else if (subcommand === 'remove') {
             const res = await pool.query('SELECT message_id FROM sticky_messages WHERE channel_id = $1', [channelId]);
@@ -89,9 +87,9 @@ module.exports = {
                     } catch (e) {}
                 }
                 await pool.query('DELETE FROM sticky_messages WHERE channel_id = $1', [channelId]);
-                await interaction.reply({ content: `🗑️ ${targetChannel} のスティッキーメッセージを解除しました。`, ephemeral: true });
+                await interaction.editReply({ content: `🗑️ ${targetChannel} のスティッキーメッセージを解除しました。` });
             } else {
-                await interaction.reply({ content: `⚠️ ${targetChannel} にはスティッキーメッセージが設定されていません。`, ephemeral: true });
+                await interaction.editReply({ content: `⚠️ ${targetChannel} にはスティッキーメッセージが設定されていません。` });
             }
         }
     }

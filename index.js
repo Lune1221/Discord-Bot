@@ -1,14 +1,17 @@
 require('dns').setDefaultResultOrder('ipv4first');
 const express = require('express');
+const path = require('path'); // 🟢 フォルダパス操作用に追加
 const app = express();
 const port = process.env.PORT || 10000;
-app.get('/', (req, res) => res.send('Botは24時間稼働中です！'));
+
+// 🟢 Webサーバーの静的配信設定（publicフォルダの中身をWebサイトとして公開）
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
-const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection, EmbedBuilder } = require('discord.js'); // 🟢 EmbedBuilderを追加
 const { Pool } = require('pg');
 const fs = require('fs');
-const path = require('path');
 require('dotenv').config();
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -17,6 +20,15 @@ async function initDatabase() {
     await pool.query(`CREATE TABLE IF NOT EXISTS message_counts (user_id TEXT, guild_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS omikuji_cooldowns (user_id TEXT, guild_id TEXT, last_date TEXT, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, level_channel_id TEXT);`);
+    // 🟢 スティッキーメッセージ用のテーブル
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS sticky_messages (
+            channel_id VARCHAR(32) PRIMARY KEY,
+            message_id VARCHAR(32),
+            title TEXT,
+            description TEXT
+        )
+    `);
 }
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
@@ -81,9 +93,11 @@ client.once('ready', async () => {
     }
 });
 
-// メッセージ送信時のカウントアップ ＆ レベルアップ判定・通知処理
+// 📨 メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能を統合）
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
+
+    // 1️⃣ レベルアップ用のカウント・通知処理
     try {
         const query = `
             INSERT INTO message_counts (user_id, guild_id, count) 
@@ -115,7 +129,39 @@ client.on('messageCreate', async (message) => {
             await targetChannel.send(`🎉  ${message.author} おめでとうございます！レベル **${newInfo.level}** にアップしました！`);
         }
     } catch (e) { 
-        console.error(e); 
+        console.error('レベルアップ処理エラー:', e); 
+    }
+
+    // 2️⃣ スティッキーメッセージの再送信処理
+    try {
+        const stickyRes = await pool.query('SELECT * FROM sticky_messages WHERE channel_id = $1', [message.channel.id]);
+        if (stickyRes.rows.length > 0) {
+            const sticky = stickyRes.rows[0];
+
+            // 古いスティッキーメッセージを削除
+            if (sticky.message_id) {
+                try {
+                    const oldMsg = await message.channel.messages.fetch(sticky.message_id);
+                    if (oldMsg) await oldMsg.delete();
+                } catch (e) {
+                    // すでに手動で消されている場合などは無視
+                }
+            }
+
+            // 新しいスティッキーメッセージを一番下に送信
+            const embed = new EmbedBuilder()
+                .setTitle(sticky.title)
+                .setDescription(sticky.description)
+                .setColor('#3498db')
+                .setTimestamp();
+
+            const newMsg = await message.channel.send({ embeds: [embed] });
+
+            // 新しいメッセージのIDをデータベースに保存
+            await pool.query('UPDATE sticky_messages SET message_id = $1 WHERE channel_id = $2', [newMsg.id, message.channel.id]);
+        }
+    } catch (error) {
+        console.error('スティッキーメッセージ処理エラー:', error);
     }
 });
 

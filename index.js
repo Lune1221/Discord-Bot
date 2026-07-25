@@ -4,8 +4,16 @@ const path = require('path'); // 🟢 フォルダパス操作用に追加
 const app = express();
 const port = process.env.PORT || 10000;
 
-// 🟢 Webサーバーの静的配信設定（publicフォルダの中身をWebサイトとして公開）
+// 🟢 Webサーバーの静的配信設定
 app.use(express.static(path.join(__dirname, 'public')));
+
+// 🟢 GASやUptimeなどの監視アクセス用（404を防ぐ）
+app.get('/', (req, res) => {
+    res.send('Botは24時間稼働中です！');
+});
+
+app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
+
 
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 

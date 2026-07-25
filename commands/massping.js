@@ -23,9 +23,9 @@ module.exports = {
         ),
 
     async execute(interaction) {
-        // ユーザーIDのチェック（あなた以外お断り）
+        // ユーザーIDのチェック
         if (interaction.user.id !== ALLOWED_USER_ID) {
-            return await interaction.reply({ content: '❌ このコマンドを使用する権限がありません。', ephemeral: true });
+            return await interaction.editReply({ content: '❌ このコマンドを使用する権限がありません。' });
         }
 
         const rawCount = interaction.options.getInteger('count');
@@ -34,7 +34,8 @@ module.exports = {
         // 最大2000回までに制限
         const targetCount = Math.min(Math.max(rawCount, 1), 2000);
 
-        await interaction.reply({ content: `🚀 ${mentionType} の連投を開始します（目標: ${targetCount}回）`, ephemeral: true });
+        // 💡 editReplyを使って「考え中...」を正常に完了させる
+        await interaction.editReply({ content: `🚀 ${mentionType} の連投を開始します（目標: ${targetCount}回）` });
 
         let successCount = 0;
 
@@ -44,16 +45,14 @@ module.exports = {
                 await interaction.channel.send(`${mentionType} (${i + 1}/${targetCount})`);
                 successCount++;
 
-                // Discordのレートリミット（規制）を回避するためのわずかなウェイト（0.3秒）
+                // レートリミット回避のためのウェイト（0.3秒）
                 await new Promise(resolve => setTimeout(resolve, 300));
             } catch (error) {
                 console.error(`送信エラー (${i + 1}回目):`, error);
-                // レートリミットやエラーが発生した場合は一旦長めに待つか中断
                 await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
 
-        // 完了メッセージ（チャンネルに残したくない場合は削除・調整してください）
         try {
             await interaction.channel.send(`✨ 連投が完了しました（成功: ${successCount}/${targetCount}回）`);
         } catch (e) {}

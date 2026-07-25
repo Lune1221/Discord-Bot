@@ -14,9 +14,6 @@ app.get('/', (req, res) => {
 
 app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
 
-
-app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
-
 const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection, EmbedBuilder } = require('discord.js'); // 🟢 EmbedBuilderを追加
 const { Pool } = require('pg');
 const fs = require('fs');

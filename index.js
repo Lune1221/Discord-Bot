@@ -174,7 +174,7 @@ client.on('interactionCreate', async (interaction) => {
         if (!command) return;
 
         try {
-            await interaction.deferReply({ ephemeral: interaction.commandName === 'scan' });
+            await interaction.deferReply({ ephemeral: interaction.commandName === 'scan' || interaction.commandName === 'massping' });
             await command.execute(interaction, pool);
         } catch (error) {
             console.error(error);

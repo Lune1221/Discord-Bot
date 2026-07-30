@@ -50,13 +50,12 @@ async function initDatabase() {
             send_at TIMESTAMP
         )
     `);
-    // 複数の自己紹介設定を保存できるテーブル
+    // シンプルな設定テーブル（出力先はVCインサイドチャットに固定）
     await pool.query(`
         CREATE TABLE IF NOT EXISTS intro_channel_settings (
             id SERIAL PRIMARY KEY,
             guild_id TEXT,
             source_channel_id TEXT,
-            output_channel_id TEXT,
             keyword TEXT DEFAULT '名前：'
         )
     `);
@@ -159,7 +158,7 @@ client.once('ready', async () => {
     }
 });
 
-// 誰かがボイスチャンネルに参加したとき、登録された設定に従って自己紹介を自動送信
+// 🔊 誰かがボイスチャンネルに参加したとき、参加したVCのインサイドチャットに自動送信
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!newState.channelId) return; // 退出時は無視
     
@@ -167,19 +166,18 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!channel) return;
 
     try {
-        const settingRes = await pool.query('SELECT source_channel_id, output_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
+        const settingRes = await pool.query('SELECT source_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
         if (settingRes.rows.length === 0) return;
 
         const membersInVc = channel.members.filter(m => !m.user.bot);
         if (membersInVc.size === 0) return;
 
         for (const setting of settingRes.rows) {
-            const { source_channel_id, output_channel_id, keyword } = setting;
-            if (!source_channel_id || !output_channel_id) continue;
+            const { source_channel_id, keyword } = setting;
+            if (!source_channel_id) continue;
 
             const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
-            const outputChannel = newState.guild.channels.cache.get(output_channel_id);
-            if (!sourceChannel || !outputChannel) continue;
+            if (!sourceChannel) continue;
 
             const messages = await sourceChannel.messages.fetch({ limit: 100 });
             const searchKeyword = keyword || '名前：';
@@ -192,12 +190,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                     m.content.includes(searchKeyword)
                 );
                 
-                const bio = userMsg ? userMsg.content : `（#自己紹介 に「${searchKeyword}」を含む投稿が見つかりません）`;
-                const trimmedBio = bio.length > 80 ? bio.substring(0, 80) + '...' : bio;
-                introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+                if (userMsg) {
+                    const trimmedBio = userMsg.content.length > 80 ? userMsg.content.substring(0, 80) + '...' : userMsg.content;
+                    introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+                } else {
+                    // 🟢 自己紹介が見つからない場合の表記
+                    introText += `• **${member.displayName}** :\n（自己紹介がありません）\n\n`;
+                }
             }
 
-            await outputChannel.send(introText);
+            // 🟢 参加したボイスチャンネルのインサイドチャットへ直接送信
+            await channel.send(introText);
         }
 
     } catch (e) {
@@ -296,12 +299,4 @@ client.on('interactionCreate', async (interaction) => {
         const [action, pageStr, executorId] = interaction.customId.split('_');
         if (interaction.user.id !== executorId) { return await interaction.reply({ content: '❌ 本人しか操作できません。', ephemeral: true }); }
         
-        const rankingCommand = client.commands.get('ranking');
-        if (!rankingCommand) return;
-        
-        let page = parseInt(pageStr, 10) + (action === 'prev' ? -1 : 1);
-        await rankingCommand.executeButton(interaction, pool, page, executorId);
-    }
-});
-
-client.login(TOKEN);
+        ...

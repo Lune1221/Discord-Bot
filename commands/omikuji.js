@@ -16,10 +16,8 @@ module.exports = {
         const guildId = interaction.guild?.id;
         const userId = interaction.user.id;
         
-        // 今日の日本時間の日付を「2026/7/21」のような文字の形で作る
         const todayStr = new Date().toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
 
-        // 1. 1日1回制限の重複チェック
         const cooldownRes = await pool.query(
             "SELECT last_date FROM omikuji_cooldowns WHERE user_id = $1 AND guild_id = $2",
             [userId, guildId]
@@ -34,17 +32,14 @@ module.exports = {
             return await interaction.editReply({ embeds: [embedError] });
         }
 
-        // 2. まだ引いていなければ、ランダムで運勢を選ぶ
         const fortune = omikujiResults[Math.floor(Math.random() * omikujiResults.length)];
 
-        // 3. 今日引いたという事実をSupabaseに保存（上書き）
         await pool.query(`
             INSERT INTO omikuji_cooldowns (user_id, guild_id, last_date) 
             VALUES ($1, $2, $3) 
             ON CONFLICT(user_id, guild_id) DO UPDATE SET last_date = $3
         `, [userId, guildId, todayStr]);
 
-        // 4. キレイな赤い埋め込みカードでお披露目
         const embed = new EmbedBuilder()
             .setTitle('おみくじ結果')
             .setDescription(`<@${interaction.user.id}> さんの今日の運勢は...`)

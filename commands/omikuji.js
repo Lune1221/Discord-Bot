@@ -2,7 +2,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const omikujiResults = [
     '大吉 ', 
     '中吉 ', '中吉 ', 
-    '小吉 ', '小吉 🌱', 
+    '小吉 ', '小吉 ', 
     '吉 ', '吉 ', '吉 ',
     '凶 ', '凶 '
 ];

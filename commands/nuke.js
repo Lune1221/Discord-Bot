@@ -24,16 +24,18 @@ module.exports = {
                 parent: channel.parentId,
             });
 
-            // 埋め込みメッセージとGIF画像を設定
+            // 埋め込みメッセージを作成
             const embed = new EmbedBuilder()
                 .setTitle('💥 チャンネル初期化 (Nuke)')
                 .setDescription(`${interaction.user} によってチャンネルが初期化されました！`)
-                .setImage('https://media.tenor.com/6129820118499146222/tenor.gif')
                 .setColor('#ff4500')
                 .setTimestamp();
 
-            // 新しいチャンネルに埋め込みを送信
-            await cloned.send({ embeds: [embed] });
+            // 本文にTenorのURLを置くことで、Discordが自動でドカンと動くGIFに展開します
+            await cloned.send({
+                content: 'https://tenor.com/view/megumin-explosion-megumin-konosuba-anime-gods-blessing-on-this-wonderful-world-kono-subarashii-sekai-ni-shukufuku-wo-gif-6129820118499146222',
+                embeds: [embed]
+            });
 
             // 古いチャンネルを削除
             await channel.delete();

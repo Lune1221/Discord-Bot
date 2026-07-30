@@ -2,8 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType } = require('disco
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('introchannel')
-        .setDescription('自己紹介の自動表示設定を管理します')
+        .setName('vcintro')
+        .setDescription('VC参加時の自己紹介自動表示の設定を管理します')
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand(sub =>
             sub.setName('set')
@@ -16,7 +16,7 @@ module.exports = {
                 )
                 .addChannelOption(opt =>
                     opt.setName('output')
-                        .setDescription('出力先のチャンネル（インチャ、またはVCのインサイドチャンネル）')
+                        .setDescription('出力先のチャンネル（インサイドチャンネル、または通常のテキスト）')
                         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildVoice)
                         .setRequired(true)
                 )
@@ -28,7 +28,7 @@ module.exports = {
         )
         .addSubcommand(sub =>
             sub.setName('list')
-                .setDescription('現在登録されている自己紹介の設定一覧を表示します')
+                .setDescription('現在登録されているVC自己紹介の設定一覧を表示します')
         )
         .addSubcommand(sub =>
             sub.setName('delete')
@@ -56,7 +56,7 @@ module.exports = {
             );
 
             await interaction.editReply({ 
-                content: `✨ 新しい設定を追加しました！\n• 読み取り元: ${sourceChannel}\n• 出力先（インチャ等）: ${outputChannel}\n• 検索ワード: \`${keyword}\`` 
+                content: `✨ VC自己紹介の設定を追加しました！\n• 読み取り元: ${sourceChannel}\n• 出力先（インサイド等）: ${outputChannel}\n• 検索ワード: \`${keyword}\`` 
             });
 
         } else if (subcommand === 'list') {
@@ -66,10 +66,10 @@ module.exports = {
             );
 
             if (res.rows.length === 0) {
-                return await interaction.editReply({ content: '📭 現在登録されている自己紹介の設定はありません。' });
+                return await interaction.editReply({ content: '📭 現在登録されているVC自己紹介の設定はありません。' });
             }
 
-            let listText = '📋 **現在の自己紹介設定一覧**\n';
+            let listText = '📋 **現在のVC自己紹介設定一覧**\n';
             for (const row of res.rows) {
                 listText += `• **ID: ${row.id}** | 読み取り: <#${row.source_channel_id}> ➔ 出力先: <#${row.output_channel_id}> (ワード: \`${row.keyword}\`)\n`;
             }

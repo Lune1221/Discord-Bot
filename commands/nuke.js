@@ -3,7 +3,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('nuke')
-        .setDescription('現在のチャンネルを初期化（削除して複製）します')
+        .setDescription('現在のチャンネルを初期化します')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction, pool) {
@@ -24,7 +24,7 @@ module.exports = {
                 parent: channel.parentId,
             });
 
-            // 埋め込みの中に動くGIF画像を直接表示させる
+            // 埋め込みを作成し、setImageでGIFの直リンクを指定
             const embed = new EmbedBuilder()
                 .setTitle('💥 チャンネル初期化 (Nuke)')
                 .setDescription(`${interaction.user} によってチャンネルが初期化されました！`)
@@ -32,7 +32,7 @@ module.exports = {
                 .setColor('#ff4500')
                 .setTimestamp();
 
-            // 埋め込みメッセージを送信
+            // 新しいチャンネルに埋め込みを送信
             await cloned.send({ embeds: [embed] });
 
             // 古いチャンネルを削除

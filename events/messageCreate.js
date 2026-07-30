@@ -21,7 +21,7 @@ module.exports = {
             if (raidCheck.rows.length > 0 && raidCheck.rows[0].enabled) {
                 if (message.mentions.users.size >= 5 || message.mentions.roles.size >= 5) {
                     await message.delete().catch(() => {});
-                    const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（大量メンション検知）により削除されました。`);
+                    const warn = await message.channel.send(`🛡️ ${message.author} メッセージは荒らし対策（大量メンション）により削除されました。`);
                     setTimeout(() => warn.delete().catch(() => {}), 5000);
                     return;
                 }

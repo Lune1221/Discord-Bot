@@ -25,7 +25,7 @@ module.exports = {
             });
 
             // 新しいチャンネルに通知メッセージを送信
-            await cloned.send(`💥 ${interaction.user} によってチャンネルが初期化されました！`);
+            await cloned.send(` ${interaction.user} によってチャンネルが初期化されました！`);
 
             // 古いチャンネルを削除
             await channel.delete();

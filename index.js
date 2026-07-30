@@ -4,10 +4,10 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 10000;
 
-// 🟢 Webサーバーの静的配信設定
+// Webサーバーの静的配信設定
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 🟢 GASやUptimeなどの監視アクセス用（404を防ぐ）
+// GASやUptimeなどの監視アクセス用（404を防ぐ）
 app.get('/', (req, res) => {
     res.send('Botは24時間稼働中です！');
 });
@@ -50,17 +50,19 @@ async function initDatabase() {
             send_at TIMESTAMP
         )
     `);
-    // 🟢 自己紹介と出力先チャンネルの設定用テーブル
+    // 自己紹介と出力先チャンネル、検索キーワードの設定用テーブル
     await pool.query(`
         CREATE TABLE IF NOT EXISTS intro_channel_settings (
             guild_id TEXT PRIMARY KEY,
             source_channel_id TEXT,
-            output_channel_id TEXT
+            output_channel_id TEXT,
+            keyword TEXT DEFAULT '名前：'
         )
     `);
+    await pool.query(`ALTER TABLE intro_channel_settings ADD COLUMN IF NOT EXISTS keyword TEXT DEFAULT '名前：';`).catch(() => {});
 }
 
-// 🟢 ボイスステータス取得用のインテントを追加
+// ボイスステータス取得用のインテントを追加
 const client = new Client({ 
     intents: [
         GatewayIntentBits.Guilds, 
@@ -88,7 +90,7 @@ if (fs.existsSync(foldersPath)) {
     }
 }
 
-// 📊 グラフの数式（二次関数）によるレベル計算
+// グラフの数式（二次関数）によるレベル計算
 function getRequiredMessages(level) {
     return Math.floor(10 + (level * level * 2));
 }
@@ -115,7 +117,7 @@ client.once('ready', async () => {
     const serverCount = client.guilds.cache.size;
     client.user.setActivity(`${serverCount} 個のサーバーで稼働`, { type: ActivityType.Watching });
 
-    // 🟢 1分ごとに予約メッセージの時間を確認して送信する処理
+    // 1分ごとに予約メッセージの時間を確認して送信する処理
     setInterval(async () => {
         try {
             const now = new Date();
@@ -157,7 +159,7 @@ client.once('ready', async () => {
     }
 });
 
-// 🔊 誰かがボイスチャンネルに参加したとき、自己紹介チャンネルから「名前：」が含まれる投稿を探して一括表示
+// 誰かがボイスチャンネルに参加したとき、自己紹介チャンネルから設定されたキーワードが含まれる投稿を探して一括表示
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!newState.channelId) return; // 退出時は無視
     
@@ -165,10 +167,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!channel) return;
 
     try {
-        const settingRes = await pool.query('SELECT source_channel_id, output_channel_id FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
+        const settingRes = await pool.query('SELECT source_channel_id, output_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
         if (settingRes.rows.length === 0) return;
 
-        const { source_channel_id, output_channel_id } = settingRes.rows[0];
+        const { source_channel_id, output_channel_id, keyword } = settingRes.rows[0];
         if (!source_channel_id || !output_channel_id) return;
 
         const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
@@ -179,17 +181,17 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         if (membersInVc.size === 0) return;
 
         const messages = await sourceChannel.messages.fetch({ limit: 100 });
+        const searchKeyword = keyword || '名前：';
 
         let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
 
         for (const [memberId, member] of membersInVc) {
-            // ✨ 「名前：」または「名前:」が含まれるメッセージのみを対象にする
             const userMsg = messages.find(m => 
                 m.author.id === memberId && 
-                (m.content.includes('名前：') || m.content.includes('名前:'))
+                m.content.includes(searchKeyword)
             );
             
-            const bio = userMsg ? userMsg.content : '（#自己紹介 に条件に合う投稿が見つかりません）';
+            const bio = userMsg ? userMsg.content : `（#自己紹介 に「${searchKeyword}」を含む投稿が見つかりません）`;
             const trimmedBio = bio.length > 80 ? bio.substring(0, 80) + '...' : bio;
             introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
         }
@@ -201,7 +203,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
     }
 });
 
-// 📨 メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能）
+// メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能）
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 

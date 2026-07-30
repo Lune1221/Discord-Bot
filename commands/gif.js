@@ -6,19 +6,19 @@ module.exports = {
         .setDescription('埋め込みでめぐみんのGIFを表示します'),
 
     async execute(interaction) {
-        // 1. 埋め込み（Embed）を作成
+        // 先にDiscordのテキストとして安全にGIFを投稿し、そのプレビューURLを生成させます
+        const baseMessage = await interaction.followUp('https://tenor.com/hsYNUQdAYeo.gif');
+        
+        // 送信したメッセージから、Discordが認識した正しい画像URLを取得します
+        const discordImageUrl = baseMessage.embeds[0]?.image?.url || 'https://tenor.com/hsYNUQdAYeo.gif';
+
+        // 枠（埋め込み）を作成し、Discord公認のURLをセットします
         const embed = new EmbedBuilder()
             .setTitle('めぐみんの爆裂魔法！')
             .setColor(0x00FF00)
-            // 💡 Tenorから取得した、埋め込み専用のGIF直リンクを指定します
-            .setImage('https://tenor.com/hsYNUQdAYeo.gif');
+            .setImage(discordImageUrl);
 
-        try {
-            // すでに事前処理で返信（deferReplyなど）されている場合は、followUpで埋め込みを送信
-            await interaction.followUp({ embeds: [embed] });
-        } catch (error) {
-            // 事前処理がない場合は、通常のreplyで埋め込みを送信
-            await interaction.reply({ embeds: [embed] });
-        }
+        // 枠なしのメッセージを枠ありの埋め込みに書き換えます
+        await baseMessage.edit({ content: '', embeds: [embed] });
     },
 };

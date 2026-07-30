@@ -1,6 +1,6 @@
 require('dns').setDefaultResultOrder('ipv4first');
 const express = require('express');
-const path = require('path'); // 🟢 フォルダパス操作用に追加
+const path = require('path');
 const app = express();
 const port = process.env.PORT || 10000;
 
@@ -12,9 +12,16 @@ app.get('/', (req, res) => {
     res.send('Botは24時間稼働中です！');
 });
 
-app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
+const server = app.listen(port, () => console.log(`Webサーバー起動: ${port}`));
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`ポート ${port} はすでに使用されています。`);
+    } else {
+        throw err;
+    }
+});
 
-const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection, EmbedBuilder } = require('discord.js'); // 🟢 EmbedBuilderを追加
+const { Client, GatewayIntentBits, REST, Routes, ActivityType, Collection, EmbedBuilder } = require('discord.js');
 const { Pool } = require('pg');
 const fs = require('fs');
 require('dotenv').config();
@@ -33,7 +40,6 @@ async function initDatabase() {
             description TEXT
         )
     `);
-    // 🟢 予約メッセージ用のテーブル
     await pool.query(`
         CREATE TABLE IF NOT EXISTS scheduled_messages (
             id SERIAL PRIMARY KEY,
@@ -44,9 +50,27 @@ async function initDatabase() {
             send_at TIMESTAMP
         )
     `);
+    // 🟢 自己紹介と出力先チャンネルの設定用テーブル
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS intro_channel_settings (
+            guild_id TEXT PRIMARY KEY,
+            source_channel_id TEXT,
+            output_channel_id TEXT
+        )
+    `);
 }
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
+// 🟢 ボイスステータス取得用のインテントを追加
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMessages, 
+        GatewayIntentBits.MessageContent, 
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.GuildVoiceStates
+    ] 
+});
+
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 
@@ -110,13 +134,12 @@ client.once('ready', async () => {
                     console.error(`予約メッセージ送信エラー (ID: ${row.id}):`, err);
                 }
 
-                // 送信済みのものは削除
                 await pool.query('DELETE FROM scheduled_messages WHERE id = $1', [row.id]);
             }
         } catch (e) {
             console.error('予約メッセージのチェック中にエラーが発生しました:', e);
         }
-    }, 60 * 1000); // 1分おき
+    }, 60 * 1000);
 
     // Discordへスラッシュコマンドを自動登録する処理
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -134,12 +157,54 @@ client.once('ready', async () => {
     }
 });
 
+// 🔊 誰かがボイスチャンネルに参加したとき、自己紹介チャンネルから「名前：」が含まれる投稿を探して一括表示
+client.on('voiceStateUpdate', async (oldState, newState) => {
+    if (!newState.channelId) return; // 退出時は無視
+    
+    const channel = newState.channel;
+    if (!channel) return;
 
-// 📨 メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能を統合）
+    try {
+        const settingRes = await pool.query('SELECT source_channel_id, output_channel_id FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
+        if (settingRes.rows.length === 0) return;
+
+        const { source_channel_id, output_channel_id } = settingRes.rows[0];
+        if (!source_channel_id || !output_channel_id) return;
+
+        const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
+        const outputChannel = newState.guild.channels.cache.get(output_channel_id);
+        if (!sourceChannel || !outputChannel) return;
+
+        const membersInVc = channel.members.filter(m => !m.user.bot);
+        if (membersInVc.size === 0) return;
+
+        const messages = await sourceChannel.messages.fetch({ limit: 100 });
+
+        let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
+
+        for (const [memberId, member] of membersInVc) {
+            // ✨ 「名前：」または「名前:」が含まれるメッセージのみを対象にする
+            const userMsg = messages.find(m => 
+                m.author.id === memberId && 
+                (m.content.includes('名前：') || m.content.includes('名前:'))
+            );
+            
+            const bio = userMsg ? userMsg.content : '（#自己紹介 に条件に合う投稿が見つかりません）';
+            const trimmedBio = bio.length > 80 ? bio.substring(0, 80) + '...' : bio;
+            introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+        }
+
+        await outputChannel.send(introText);
+
+    } catch (e) {
+        console.error('通話自己紹介表示エラー:', e);
+    }
+});
+
+// 📨 メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能）
 client.on('messageCreate', async (message) => {
     if (message.author.bot || !message.guild) return;
 
-    // 1️⃣ レベルアップ用のカウント・通知処理
     try {
         const query = `
             INSERT INTO message_counts (user_id, guild_id, count) 
@@ -174,23 +239,18 @@ client.on('messageCreate', async (message) => {
         console.error('レベルアップ処理エラー:', e); 
     }
 
-    // 2️⃣ スティッキーメッセージの再送信処理
     try {
         const stickyRes = await pool.query('SELECT * FROM sticky_messages WHERE channel_id = $1', [message.channel.id]);
         if (stickyRes.rows.length > 0) {
             const sticky = stickyRes.rows[0];
 
-            // 古いスティッキーメッセージを削除
             if (sticky.message_id) {
                 try {
                     const oldMsg = await message.channel.messages.fetch(sticky.message_id);
                     if (oldMsg) await oldMsg.delete();
-                } catch (e) {
-                    // すでに手動で消されている場合などは無視
-                }
+                } catch (e) {}
             }
 
-            // 新しいスティッキーメッセージを一番下に送信
             const embed = new EmbedBuilder()
                 .setTitle(sticky.title)
                 .setDescription(sticky.description)
@@ -199,7 +259,6 @@ client.on('messageCreate', async (message) => {
 
             const newMsg = await message.channel.send({ embeds: [embed] });
 
-            // 新しいメッセージのIDをデータベースに保存
             await pool.query('UPDATE sticky_messages SET message_id = $1 WHERE channel_id = $2', [newMsg.id, message.channel.id]);
         }
     } catch (error) {
@@ -216,11 +275,11 @@ client.on('interactionCreate', async (interaction) => {
         if (!command) return;
 
         try {
-            // 🟢 scheduleコマンドも非公開（ephemeral）で「考え中」にする対象に追加
             await interaction.deferReply({ 
                 ephemeral: interaction.commandName === 'scan' || 
                            interaction.commandName === 'massping' || 
-                           interaction.commandName === 'schedule' 
+                           interaction.commandName === 'schedule' ||
+                           interaction.commandName === 'introchannel'
             });
             
             await command.execute(interaction, pool);
@@ -228,7 +287,6 @@ client.on('interactionCreate', async (interaction) => {
             console.error(error);
         }
     }
-
 
     if (interaction.isButton()) {
         const [action, pageStr, executorId] = interaction.customId.split('_');

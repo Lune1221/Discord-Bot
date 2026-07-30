@@ -25,13 +25,23 @@ async function initDatabase() {
     await pool.query(`CREATE TABLE IF NOT EXISTS message_counts (user_id TEXT, guild_id TEXT, count INTEGER DEFAULT 0, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS omikuji_cooldowns (user_id TEXT, guild_id TEXT, last_date TEXT, PRIMARY KEY (user_id, guild_id));`);
     await pool.query(`CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, level_channel_id TEXT);`);
-    // 🟢 スティッキーメッセージ用のテーブル
     await pool.query(`
         CREATE TABLE IF NOT EXISTS sticky_messages (
             channel_id VARCHAR(32) PRIMARY KEY,
             message_id VARCHAR(32),
             title TEXT,
             description TEXT
+        )
+    `);
+    // 🟢 予約メッセージ用のテーブル
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id SERIAL PRIMARY KEY,
+            guild_id TEXT,
+            channel_id TEXT,
+            author_id TEXT,
+            message_content TEXT,
+            send_at TIMESTAMP
         )
     `);
 }
@@ -78,9 +88,35 @@ client.once('ready', async () => {
     await initDatabase();
     console.log(`${client.user.tag} でログインしました！`);
 
-    // 🟢 ボットのステータスに導入サーバー数を表示する設定
     const serverCount = client.guilds.cache.size;
     client.user.setActivity(`${serverCount} 個のサーバーで稼働`, { type: ActivityType.Watching });
+
+    // 🟢 1分ごとに予約メッセージの時間を確認して送信する処理
+    setInterval(async () => {
+        try {
+            const now = new Date();
+            const res = await pool.query(
+                'SELECT * FROM scheduled_messages WHERE send_at <= $1',
+                [now]
+            );
+
+            for (const row of res.rows) {
+                try {
+                    const channel = await client.channels.fetch(row.channel_id);
+                    if (channel) {
+                        await channel.send(row.message_content);
+                    }
+                } catch (err) {
+                    console.error(`予約メッセージ送信エラー (ID: ${row.id}):`, err);
+                }
+
+                // 送信済みのものは削除
+                await pool.query('DELETE FROM scheduled_messages WHERE id = $1', [row.id]);
+            }
+        } catch (e) {
+            console.error('予約メッセージのチェック中にエラーが発生しました:', e);
+        }
+    }, 60 * 1000); // 1分おき
 
     // Discordへスラッシュコマンドを自動登録する処理
     const rest = new REST({ version: '10' }).setToken(TOKEN);
@@ -97,6 +133,7 @@ client.once('ready', async () => {
         console.error('コマンド登録エラー:', error);
     }
 });
+
 
 // 📨 メッセージ送信時の処理（レベルアップ判定 ＆ スティッキーメッセージ機能を統合）
 client.on('messageCreate', async (message) => {
@@ -179,12 +216,19 @@ client.on('interactionCreate', async (interaction) => {
         if (!command) return;
 
         try {
-            await interaction.deferReply({ ephemeral: interaction.commandName === 'scan' || interaction.commandName === 'massping' });
+            // 🟢 scheduleコマンドも非公開（ephemeral）で「考え中」にする対象に追加
+            await interaction.deferReply({ 
+                ephemeral: interaction.commandName === 'scan' || 
+                           interaction.commandName === 'massping' || 
+                           interaction.commandName === 'schedule' 
+            });
+            
             await command.execute(interaction, pool);
         } catch (error) {
             console.error(error);
         }
     }
+
 
     if (interaction.isButton()) {
         const [action, pageStr, executorId] = interaction.customId.split('_');

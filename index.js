@@ -50,16 +50,16 @@ async function initDatabase() {
             send_at TIMESTAMP
         )
     `);
-    // 自己紹介と出力先チャンネル、検索キーワードの設定用テーブル
+    // 複数の自己紹介設定を保存できるテーブル
     await pool.query(`
         CREATE TABLE IF NOT EXISTS intro_channel_settings (
-            guild_id TEXT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
+            guild_id TEXT,
             source_channel_id TEXT,
             output_channel_id TEXT,
             keyword TEXT DEFAULT '名前：'
         )
     `);
-    await pool.query(`ALTER TABLE intro_channel_settings ADD COLUMN IF NOT EXISTS keyword TEXT DEFAULT '名前：';`).catch(() => {});
 }
 
 // ボイスステータス取得用のインテントを追加
@@ -159,7 +159,7 @@ client.once('ready', async () => {
     }
 });
 
-// 誰かがボイスチャンネルに参加したとき、自己紹介チャンネルから設定されたキーワードが含まれる投稿を探して一括表示
+// 誰かがボイスチャンネルに参加したとき、登録された設定に従って自己紹介を自動送信
 client.on('voiceStateUpdate', async (oldState, newState) => {
     if (!newState.channelId) return; // 退出時は無視
     
@@ -170,33 +170,35 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         const settingRes = await pool.query('SELECT source_channel_id, output_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
         if (settingRes.rows.length === 0) return;
 
-        const { source_channel_id, output_channel_id, keyword } = settingRes.rows[0];
-        if (!source_channel_id || !output_channel_id) return;
-
-        const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
-        const outputChannel = newState.guild.channels.cache.get(output_channel_id);
-        if (!sourceChannel || !outputChannel) return;
-
         const membersInVc = channel.members.filter(m => !m.user.bot);
         if (membersInVc.size === 0) return;
 
-        const messages = await sourceChannel.messages.fetch({ limit: 100 });
-        const searchKeyword = keyword || '名前：';
+        for (const setting of settingRes.rows) {
+            const { source_channel_id, output_channel_id, keyword } = setting;
+            if (!source_channel_id || !output_channel_id) continue;
 
-        let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
+            const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
+            const outputChannel = newState.guild.channels.cache.get(output_channel_id);
+            if (!sourceChannel || !outputChannel) continue;
 
-        for (const [memberId, member] of membersInVc) {
-            const userMsg = messages.find(m => 
-                m.author.id === memberId && 
-                m.content.includes(searchKeyword)
-            );
-            
-            const bio = userMsg ? userMsg.content : `（#自己紹介 に「${searchKeyword}」を含む投稿が見つかりません）`;
-            const trimmedBio = bio.length > 80 ? bio.substring(0, 80) + '...' : bio;
-            introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+            const messages = await sourceChannel.messages.fetch({ limit: 100 });
+            const searchKeyword = keyword || '名前：';
+
+            let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
+
+            for (const [memberId, member] of membersInVc) {
+                const userMsg = messages.find(m => 
+                    m.author.id === memberId && 
+                    m.content.includes(searchKeyword)
+                );
+                
+                const bio = userMsg ? userMsg.content : `（#自己紹介 に「${searchKeyword}」を含む投稿が見つかりません）`;
+                const trimmedBio = bio.length > 80 ? bio.substring(0, 80) + '...' : bio;
+                introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+            }
+
+            await outputChannel.send(introText);
         }
-
-        await outputChannel.send(introText);
 
     } catch (e) {
         console.error('通話自己紹介表示エラー:', e);

@@ -3,7 +3,7 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('gif')
-        .setDescription('埋め込みでめぐみんのGIFを表示しますコマンドを作るとき使います)'),
+        .setDescription('埋め込みでめぐみんのGIFを表示します(コマンドを作るとき使います)'),
 
     async execute(interaction) {
         // 先にDiscordのテキストとして安全にGIFを投稿し、そのプレビューURLを生成させます

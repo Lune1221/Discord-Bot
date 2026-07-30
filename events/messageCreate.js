@@ -1,7 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 
-// ユーザーごとのメッセージ送信履歴 { userId: [timestamp, ...] }
-const userMessageTimestamps = new Map();
+// ユーザーごとのメッセージ履歴 { userId: [{ timestamp, messageId }, ...] }
+const userMessageHistory = new Map();
 // ユーザーごとの前回の警告送信時刻 { userId: timestamp }
 const userLastWarnTimestamp = new Map();
 
@@ -44,19 +44,27 @@ module.exports = {
                 // 2. 短時間の連投検知（3秒以内に5回以上）
                 const userId = message.author.id;
                 const now = Date.now();
-                if (!userMessageTimestamps.has(userId)) {
-                    userMessageTimestamps.set(userId, []);
+                if (!userMessageHistory.has(userId)) {
+                    userMessageHistory.set(userId, []);
                 }
-                const timestamps = userMessageTimestamps.get(userId);
-                timestamps.push(now);
+                let history = userMessageHistory.get(userId);
+                history.push({ timestamp: now, messageId: message.id });
 
                 // 3秒（3000ミリ秒）以内の履歴だけを残す
-                const recentTimestamps = timestamps.filter(t => now - t <= 3000);
-                userMessageTimestamps.set(userId, recentTimestamps);
+                history = history.filter(item => now - item.timestamp <= 3000);
+                userMessageHistory.set(userId, history);
 
-                if (recentTimestamps.length >= 5) {
-                    await message.delete().catch(err => console.error('メッセージ削除エラー(連投):', err));
-                    
+                if (history.length >= 5) {
+                    // 3秒以内に送信されたメッセージをすべて削除
+                    for (const item of history) {
+                        try {
+                            const msgToDelete = await message.channel.messages.fetch(item.messageId).catch(() => null);
+                            if (msgToDelete) await msgToDelete.delete();
+                        } catch (err) {
+                            console.error('連投メッセージ一括削除エラー:', err);
+                        }
+                    }
+
                     const lastWarn = userLastWarnTimestamp.get(userId) || 0;
                     if (now - lastWarn > 3000) {
                         userLastWarnTimestamp.set(userId, now);
@@ -64,7 +72,8 @@ module.exports = {
                         setTimeout(() => warn.delete().catch(() => {}), 5000);
                     }
 
-                    userMessageTimestamps.set(userId, []);
+                    // 履歴をリセット
+                    userMessageHistory.set(userId, []);
                     return;
                 }
             }

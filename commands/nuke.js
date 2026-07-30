@@ -24,8 +24,8 @@ module.exports = {
                 parent: channel.parentId,
             });
 
-            // 新しいチャンネルに通知メッセージを送信
-            await cloned.send(` ${interaction.user} によってチャンネルが初期化されました！`);
+            // 新しいチャンネルに通知と爆破GIFを送信
+            await cloned.send(`💥 ${interaction.user} によってチャンネルが初期化されました！\nhttps://tenor.com/view/megumin-explosion-megumin-konosuba-anime-gods-blessing-on-this-wonderful-world-kono-subarashii-sekai-ni-shukufuku-wo-gif-6129820118499146222`);
 
             // 古いチャンネルを削除
             await channel.delete();

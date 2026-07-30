@@ -51,7 +51,7 @@ async function initDatabase() {
         )
     `);
     
-    // 🟢 DROP TABLEを削除し、データが消えないように変更
+    // VC自己紹介の設定テーブル
     await pool.query(`
         CREATE TABLE IF NOT EXISTS intro_channel_settings (
             id SERIAL PRIMARY KEY,
@@ -159,48 +159,74 @@ client.once('ready', async () => {
     }
 });
 
-// 🔊 誰かがボイスチャンネルに参加したとき、参加したVCのインサイドチャットに自動送信
+// 🔊 ボイスチャンネルの入退室時にメッセージを更新する処理
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    if (!newState.channelId) return; // 退出時は無視
-    
-    const channel = newState.channel;
-    if (!channel) return;
+    // ミュートや画面共有などのステータス変更は無視（チャンネル移動/入退室のみ処理）
+    if (oldState.channelId === newState.channelId) return; 
+
+    const guild = newState.guild || oldState.guild;
 
     try {
-        const settingRes = await pool.query('SELECT source_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [newState.guild.id]);
+        const settingRes = await pool.query('SELECT source_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1', [guild.id]);
         if (settingRes.rows.length === 0) return;
 
-        const membersInVc = channel.members.filter(m => !m.user.bot);
-        if (membersInVc.size === 0) return;
+        const { source_channel_id, keyword } = settingRes.rows[0];
+        if (!source_channel_id) return;
 
-        for (const setting of settingRes.rows) {
-            const { source_channel_id, keyword } = setting;
-            if (!source_channel_id) continue;
+        const sourceChannel = guild.channels.cache.get(source_channel_id);
+        if (!sourceChannel) return;
 
-            const sourceChannel = newState.guild.channels.cache.get(source_channel_id);
-            if (!sourceChannel) continue;
+        const messages = await sourceChannel.messages.fetch({ limit: 100 });
+        const searchKeyword = keyword || '名前：';
 
-            const messages = await sourceChannel.messages.fetch({ limit: 100 });
-            const searchKeyword = keyword || '名前：';
+        // チャンネルのインサイドチャットを更新する関数
+        const updateVcIntro = async (channel) => {
+            if (!channel) return;
 
-            let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
+            const membersInVc = channel.members.filter(m => !m.user.bot);
+            let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n\n`;
 
-            for (const [memberId, member] of membersInVc) {
-                const userMsg = messages.find(m => 
-                    m.author.id === memberId && 
-                    m.content.includes(searchKeyword)
-                );
-                
-                if (userMsg) {
-                    const trimmedBio = userMsg.content.length > 80 ? userMsg.content.substring(0, 80) + '...' : userMsg.content;
-                    introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
-                } else {
-                    introText += `• **${member.displayName}** :\n（自己紹介がありません）\n\n`;
+            if (membersInVc.size === 0) {
+                introText += `現在、誰も参加していません。`;
+            } else {
+                for (const [memberId, member] of membersInVc) {
+                    const userMsg = messages.find(m => 
+                        m.author.id === memberId && 
+                        m.content.includes(searchKeyword)
+                    );
+                    
+                    if (userMsg) {
+                        const trimmedBio = userMsg.content.length > 80 ? userMsg.content.substring(0, 80) + '...' : userMsg.content;
+                        introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
+                    } else {
+                        introText += `• **${member.displayName}** :\n（自己紹介がありません）\n\n`;
+                    }
                 }
             }
 
-            await channel.send(introText);
-        }
+            try {
+                // 過去のメッセージからボットが送信した自己紹介パネルを探す
+                const vcMessages = await channel.messages.fetch({ limit: 50 });
+                const existingMsg = vcMessages.find(m => 
+                    m.author.id === client.user.id && 
+                    m.content.includes(`🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**`)
+                );
+
+                if (existingMsg) {
+                    // あれば編集
+                    await existingMsg.edit(introText);
+                } else {
+                    // なければ新規送信
+                    await channel.send(introText);
+                }
+            } catch (err) {
+                console.error(`VCメッセージ更新エラー (${channel.name}):`, err);
+            }
+        };
+
+        // 退室元のVCと、参加先のVCの両方を更新する
+        if (oldState.channel) await updateVcIntro(oldState.channel);
+        if (newState.channel) await updateVcIntro(newState.channel);
 
     } catch (e) {
         console.error('通話自己紹介表示エラー:', e);

@@ -51,10 +51,9 @@ async function initDatabase() {
         )
     `);
     
-    // 🟢 古いテーブル構造を一度リセットして新しく作り直す
-    await pool.query(`DROP TABLE IF EXISTS intro_channel_settings;`);
+    // 🟢 DROP TABLEを削除し、データが消えないように変更
     await pool.query(`
-        CREATE TABLE intro_channel_settings (
+        CREATE TABLE IF NOT EXISTS intro_channel_settings (
             id SERIAL PRIMARY KEY,
             guild_id TEXT,
             source_channel_id TEXT,
@@ -184,7 +183,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             const messages = await sourceChannel.messages.fetch({ limit: 100 });
             const searchKeyword = keyword || '名前：';
 
-            let introText = ` **メンバーの自己紹介**\n`;
+            let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
 
             for (const [memberId, member] of membersInVc) {
                 const userMsg = messages.find(m => 
@@ -292,7 +291,6 @@ client.on('interactionCreate', async (interaction) => {
             await command.execute(interaction, pool);
         } catch (error) {
             console.error('コマンド実行エラー:', error);
-            // 🟢 Discord上にも詳しいエラー内容を表示する
             const errorMsg = `❌ コマンドの実行中にエラーが発生しました。\n\`\`\`js\n${error.message}\n\`\`\``;
             try {
                 if (interaction.deferred || interaction.replied) {

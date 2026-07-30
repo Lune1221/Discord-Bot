@@ -283,7 +283,7 @@ client.on('interactionCreate', async (interaction) => {
                 ephemeral: interaction.commandName === 'scan' || 
                            interaction.commandName === 'massping' || 
                            interaction.commandName === 'schedule' ||
-                           interaction.commandName === 'introchannel'
+                           interaction.commandName === 'vcintro'
             });
             
             await command.execute(interaction, pool);

@@ -194,12 +194,10 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
                     const trimmedBio = userMsg.content.length > 80 ? userMsg.content.substring(0, 80) + '...' : userMsg.content;
                     introText += `• **${member.displayName}** :\n${trimmedBio}\n\n`;
                 } else {
-                    // 🟢 自己紹介が見つからない場合の表記
                     introText += `• **${member.displayName}** :\n（自己紹介がありません）\n\n`;
                 }
             }
 
-            // 🟢 参加したボイスチャンネルのインサイドチャットへ直接送信
             await channel.send(introText);
         }
 
@@ -291,7 +289,17 @@ client.on('interactionCreate', async (interaction) => {
             
             await command.execute(interaction, pool);
         } catch (error) {
-            console.error(error);
+            console.error('コマンド実行エラー:', error);
+            // 🟢 エラー時に「考え中...」が消えないのを防ぐ
+            try {
+                if (interaction.deferred || interaction.replied) {
+                    await interaction.editReply({ content: '❌ コマンドの実行中にエラーが発生しました。' });
+                } else {
+                    await interaction.reply({ content: '❌ コマンドの実行中にエラーが発生しました。', ephemeral: true });
+                }
+            } catch (e) {
+                // 返信できない場合はコンソールに出力
+            }
         }
     }
 
@@ -299,4 +307,12 @@ client.on('interactionCreate', async (interaction) => {
         const [action, pageStr, executorId] = interaction.customId.split('_');
         if (interaction.user.id !== executorId) { return await interaction.reply({ content: '❌ 本人しか操作できません。', ephemeral: true }); }
         
-        ...
+        const rankingCommand = client.commands.get('ranking');
+        if (!rankingCommand) return;
+        
+        let page = parseInt(pageStr, 10) + (action === 'prev' ? -1 : 1);
+        await rankingCommand.executeButton(interaction, pool, page, executorId);
+    }
+});
+
+client.login(TOKEN);

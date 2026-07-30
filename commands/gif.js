@@ -15,6 +15,6 @@ module.exports = {
             .setImage('https://tenor.com');
 
         // スラッシュコマンドに対して返信する
-        await interaction.reply({ embeds: [embed] });
+        await interaction.editreply({ embeds: [embed] });
     },
 };

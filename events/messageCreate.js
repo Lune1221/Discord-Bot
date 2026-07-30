@@ -1,5 +1,8 @@
 const { EmbedBuilder } = require('discord.js');
 
+// ユーザーごとのメッセージ送信履歴を保持するMap { userId: [timestamp, ...] }
+const userMessageTimestamps = new Map();
+
 function getLevelInfo(count) {
     let level = 0;
     while (true) {
@@ -15,18 +18,44 @@ module.exports = {
     async execute(message, client, pool) {
         if (message.author.bot || !message.guild) return;
 
-        // 🛡️ 荒らし対策チェック
+        // 🛡️ 荒らし対策チェック（有効時）
         try {
             const raidCheck = await pool.query('SELECT enabled FROM antiraid_settings WHERE guild_id = $1', [message.guild.id]);
             if (raidCheck.rows.length > 0 && raidCheck.rows[0].enabled) {
+                
+                // 1. 大量メンション検知（5個以上）
                 if (message.mentions.users.size >= 5 || message.mentions.roles.size >= 5) {
                     await message.delete().catch(() => {});
-                    const warn = await message.channel.send(`🛡️ ${message.author} メッセージは荒らし対策（大量メンション）により削除されました。`);
+                    const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（大量メンション検知）により削除されました。`);
                     setTimeout(() => warn.delete().catch(() => {}), 5000);
                     return;
                 }
+
+                // 2. 短時間の連投検知（3秒以内に5回以上）
+                const userId = message.author.id;
+                const now = Date.now();
+                if (!userMessageTimestamps.has(userId)) {
+                    userMessageTimestamps.set(userId, []);
+                }
+                const timestamps = userMessageTimestamps.get(userId);
+                timestamps.push(now);
+
+                // 3秒（3000ミリ秒）以内の履歴だけを残す
+                const recentTimestamps = timestamps.filter(t => now - t <= 3000);
+                userMessageTimestamps.set(userId, recentTimestamps);
+
+                if (recentTimestamps.length >= 5) {
+                    await message.delete().catch(() => {});
+                    const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（短時間の連投検知）により削除されました。`);
+                    setTimeout(() => warn.delete().catch(() => {}), 5000);
+                    // 履歴をリセットして連続警告を防ぐ
+                    userMessageTimestamps.set(userId, []);
+                    return;
+                }
             }
-        } catch (e) {}
+        } catch (e) {
+            console.error('荒らし対策エラー:', e);
+        }
 
         // レベルアップ処理
         try {

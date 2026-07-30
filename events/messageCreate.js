@@ -1,7 +1,9 @@
 const { EmbedBuilder } = require('discord.js');
 
-// ユーザーごとのメッセージ送信履歴を保持するMap { userId: [timestamp, ...] }
+// ユーザーごとのメッセージ送信履歴 { userId: [timestamp, ...] }
 const userMessageTimestamps = new Map();
+// ユーザーごとの前回の警告送信時刻 { userId: timestamp }
+const userLastWarnTimestamp = new Map();
 
 function getLevelInfo(count) {
     let level = 0;
@@ -25,9 +27,17 @@ module.exports = {
                 
                 // 1. 大量メンション検知（5個以上）
                 if (message.mentions.users.size >= 5 || message.mentions.roles.size >= 5) {
-                    await message.delete().catch(() => {});
-                    const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（大量メンション検知）により削除されました。`);
-                    setTimeout(() => warn.delete().catch(() => {}), 5000);
+                    await message.delete().catch(err => console.error('メッセージ削除エラー(メンション):', err));
+                    
+                    const userId = message.author.id;
+                    const now = Date.now();
+                    const lastWarn = userLastWarnTimestamp.get(userId) || 0;
+
+                    if (now - lastWarn > 3000) {
+                        userLastWarnTimestamp.set(userId, now);
+                        const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（大量メンション検知）により削除されました。`);
+                        setTimeout(() => warn.delete().catch(() => {}), 5000);
+                    }
                     return;
                 }
 
@@ -45,10 +55,15 @@ module.exports = {
                 userMessageTimestamps.set(userId, recentTimestamps);
 
                 if (recentTimestamps.length >= 5) {
-                    await message.delete().catch(() => {});
-                    const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（短時間の連投検知）により削除されました。`);
-                    setTimeout(() => warn.delete().catch(() => {}), 5000);
-                    // 履歴をリセットして連続警告を防ぐ
+                    await message.delete().catch(err => console.error('メッセージ削除エラー(連投):', err));
+                    
+                    const lastWarn = userLastWarnTimestamp.get(userId) || 0;
+                    if (now - lastWarn > 3000) {
+                        userLastWarnTimestamp.set(userId, now);
+                        const warn = await message.channel.send(`🛡️ ${message.author} さんのメッセージは荒らし対策（短時間の連投検知）により削除されました。`);
+                        setTimeout(() => warn.delete().catch(() => {}), 5000);
+                    }
+
                     userMessageTimestamps.set(userId, []);
                     return;
                 }

@@ -184,7 +184,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             const messages = await sourceChannel.messages.fetch({ limit: 100 });
             const searchKeyword = keyword || '名前：';
 
-            let introText = `🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**\n`;
+            let introText = ` **【 ${channel.name} 】メンバーの自己紹介**\n`;
 
             for (const [memberId, member] of membersInVc) {
                 const userMsg = messages.find(m => 

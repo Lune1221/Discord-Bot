@@ -1,25 +1,14 @@
-const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
+    // 1. スラッシュコマンド（/gif）の登録データ
     data: new SlashCommandBuilder()
         .setName('gif')
-        .setDescription('GIF埋め込みを表示します'),
-        
+        .setDescription('めぐみんのGIFを表示します'),
+
+    // 2. コマンドが実行されたときの処理
     async execute(interaction) {
-        // あなたが用意したTenorのURL
-        const tenorUrl = 'https://tenor.com';
-        
-        // 💡 Discordが認識できる本物の画像URL（media.tenor.com）に自動で変換する処理
-        const realGifUrl = tenorUrl
-            .replace('://tenor.com', 'media.://tenor.com')
-            .replace('.gif', 'AAAAC/megumin-explosion.gif');
-
-        const embed = new EmbedBuilder()
-            .setTitle('GIFテスト（このすば）')
-            .setColor(0xFF0000)
-            // 変換後の安全なURLをセット
-            .setImage(realGifUrl);
-
-        await interaction.reply({ embeds: [embed] });
+        // 直接GIFのWebリンクを返信することで、Discordが自動でプレビューを展開します
+        await interaction.reply('https://tenor.com/hsYNUQdAYeo.gif');
     },
 };

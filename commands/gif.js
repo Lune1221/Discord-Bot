@@ -1,14 +1,17 @@
 const { SlashCommandBuilder } = require('discord.js');
 
 module.exports = {
-    // スラッシュコマンド（/gif）の定義
     data: new SlashCommandBuilder()
         .setName('gif')
-        .setDescription('めぐみんのGIFを表示します'),
+        .setDescription('めぐみんの爆裂魔法GIFを表示します'),
 
-    // コマンド実行時の処理
     async execute(interaction) {
-        // 💡 共有いただいたTenorのURLを返信します
-        await interaction.reply('https://tenor.com/hsYNUQdAYeo.gif');
+        try {
+            // すでに返信されている場合は追記（followUp）として送信します
+            await interaction.followUp('https://tenor.com/hsYNUQdAYeo.gif');
+        } catch (error) {
+            // 万が一、事前の返信処理がない場合は通常のreplyで送信します
+            await interaction.reply('https://tenor.com/hsYNUQdAYeo.gif');
+        }
     },
 };

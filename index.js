@@ -184,7 +184,7 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             if (!channel) return;
 
             const membersInVc = channel.members.filter(m => !m.user.bot);
-            let introText = `**参加メンバーの自己紹介**\n\n`;
+            let introText = `**参加メンバー**\n\n`;
 
             if (membersInVc.size === 0) {
                 introText += `現在、誰も参加していません。`;

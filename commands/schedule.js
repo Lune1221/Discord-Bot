@@ -48,8 +48,10 @@ module.exports = {
             const messageContent = interaction.options.getString('message');
             const timeStr = interaction.options.getString('time');
 
-            // 日時のパース
-            const targetDate = new Date(timeStr);
+            // 日時のパース（日本時間として正確に解釈させる）
+            const normalizedTimeStr = timeStr.replace(' ', 'T') + '+09:00';
+            const targetDate = new Date(normalizedTimeStr);
+            
             if (isNaN(targetDate.getTime())) {
                 return await interaction.editReply({ content: '❌ 日時の形式が正しくありません。「`YYYY-MM-DD HH:MM`」の形式で入力してください（例: `2026-12-31 23:59`）。' });
             }

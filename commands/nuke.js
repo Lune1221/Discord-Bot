@@ -3,7 +3,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } = require('disc
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('nuke')
-        .setDescription('現在のチャンネルを初期化します')
+        .setDescription('現在のチャンネルを初期化（削除して複製）します')
         .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
     async execute(interaction, pool) {
@@ -24,18 +24,16 @@ module.exports = {
                 parent: channel.parentId,
             });
 
-            // 埋め込みメッセージを作成
+            // 埋め込みメッセージとGIF画像を設定
             const embed = new EmbedBuilder()
                 .setTitle('💥 チャンネル初期化 (Nuke)')
                 .setDescription(`${interaction.user} によってチャンネルが初期化されました！`)
+                .setImage('https://media.tenor.com/6129820118499146222/tenor.gif')
                 .setColor('#ff4500')
                 .setTimestamp();
 
-            // 本文にTenorのURLをそのまま含めて送信（Discordが自動でGIFに展開します）
-            await cloned.send({
-                content: 'https://tenor.com/view/megumin-explosion-megumin-konosuba-anime-gods-blessing-on-this-wonderful-world-kono-subarashii-sekai-ni-shukufuku-wo-gif-6129820118499146222',
-                embeds: [embed]
-            });
+            // 新しいチャンネルに埋め込みを送信
+            await cloned.send({ embeds: [embed] });
 
             // 古いチャンネルを削除
             await channel.delete();

@@ -161,7 +161,6 @@ client.once('ready', async () => {
 
 // 🔊 ボイスチャンネルの入退室時にメッセージを更新する処理
 client.on('voiceStateUpdate', async (oldState, newState) => {
-    // ミュートや画面共有などのステータス変更は無視（チャンネル移動/入退室のみ処理）
     if (oldState.channelId === newState.channelId) return; 
 
     const guild = newState.guild || oldState.guild;
@@ -179,12 +178,11 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
         const messages = await sourceChannel.messages.fetch({ limit: 100 });
         const searchKeyword = keyword || '名前：';
 
-        // チャンネルのインサイドチャットを更新する関数
         const updateVcIntro = async (channel) => {
             if (!channel) return;
 
             const membersInVc = channel.members.filter(m => !m.user.bot);
-            let introText = `**参加メンバー**\n\n`;
+            let introText = `参加メンバー\n\n`;
 
             if (membersInVc.size === 0) {
                 introText += `現在、誰も参加していません。`;
@@ -205,18 +203,16 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             }
 
             try {
-                // 過去のメッセージからボットが送信した自己紹介パネルを探す
                 const vcMessages = await channel.messages.fetch({ limit: 50 });
+                // 「参加メンバー」で始まるボット自身のメッセージを検索
                 const existingMsg = vcMessages.find(m => 
                     m.author.id === client.user.id && 
-                    m.content.includes(`🔊 **【 ${channel.name} 】通話参加メンバーの自己紹介**`)
+                    m.content.startsWith('参加メンバー')
                 );
 
                 if (existingMsg) {
-                    // あれば編集
                     await existingMsg.edit(introText);
                 } else {
-                    // なければ新規送信
                     await channel.send(introText);
                 }
             } catch (err) {
@@ -224,7 +220,6 @@ client.on('voiceStateUpdate', async (oldState, newState) => {
             }
         };
 
-        // 退室元のVCと、参加先のVCの両方を更新する
         if (oldState.channel) await updateVcIntro(oldState.channel);
         if (newState.channel) await updateVcIntro(newState.channel);
 

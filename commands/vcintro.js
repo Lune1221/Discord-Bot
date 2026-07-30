@@ -7,17 +7,11 @@ module.exports = {
         .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
         .addSubcommand(sub =>
             sub.setName('set')
-                .setDescription('新しい自己紹介の連携設定を追加します')
+                .setDescription('自己紹介チャンネルとの連携設定を追加します')
                 .addChannelOption(opt =>
                     opt.setName('source')
-                        .setDescription('自己紹介が投稿されているチャンネル（例: #自己紹介）')
+                        .setDescription('自己紹介が投稿されているテキストチャンネル（例: #自己紹介）')
                         .addChannelTypes(ChannelType.GuildText)
-                        .setRequired(true)
-                )
-                .addChannelOption(opt =>
-                    opt.setName('output')
-                        .setDescription('出力先のチャンネル（インサイドチャンネル、または通常のテキスト）')
-                        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildVoice)
                         .setRequired(true)
                 )
                 .addStringOption(opt =>
@@ -28,7 +22,7 @@ module.exports = {
         )
         .addSubcommand(sub =>
             sub.setName('list')
-                .setDescription('現在登録されているVC自己紹介の設定一覧を表示します')
+                .setDescription('現在登録されている自己紹介の設定一覧を表示します')
         )
         .addSubcommand(sub =>
             sub.setName('delete')
@@ -46,22 +40,21 @@ module.exports = {
 
         if (subcommand === 'set') {
             const sourceChannel = interaction.options.getChannel('source');
-            const outputChannel = interaction.options.getChannel('output');
             const keyword = interaction.options.getString('keyword') || '名前：';
 
             await pool.query(
-                `INSERT INTO intro_channel_settings (guild_id, source_channel_id, output_channel_id, keyword) 
-                 VALUES ($1, $2, $3, $4)`,
-                [guildId, sourceChannel.id, outputChannel.id, keyword]
+                `INSERT INTO intro_channel_settings (guild_id, source_channel_id, keyword) 
+                 VALUES ($1, $2, $3)`,
+                [guildId, sourceChannel.id, keyword]
             );
 
             await interaction.editReply({ 
-                content: `✨ VC自己紹介の設定を追加しました！\n• 読み取り元: ${sourceChannel}\n• 出力先（インサイド等）: ${outputChannel}\n• 検索ワード: \`${keyword}\`` 
+                content: `✨ VC自己紹介の設定を追加しました！\n• 読み取り元チャンネル: ${sourceChannel}\n• 検索ワード: \`${keyword}\`\n*(※ 参加したVCのインサイドチャットに自動で送信されます)*` 
             });
 
         } else if (subcommand === 'list') {
             const res = await pool.query(
-                'SELECT id, source_channel_id, output_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1 ORDER BY id ASC',
+                'SELECT id, source_channel_id, keyword FROM intro_channel_settings WHERE guild_id = $1 ORDER BY id ASC',
                 [guildId]
             );
 
@@ -71,7 +64,7 @@ module.exports = {
 
             let listText = '📋 **現在のVC自己紹介設定一覧**\n';
             for (const row of res.rows) {
-                listText += `• **ID: ${row.id}** | 読み取り: <#${row.source_channel_id}> ➔ 出力先: <#${row.output_channel_id}> (ワード: \`${row.keyword}\`)\n`;
+                listText += `• **ID: ${row.id}** | 読み取り: <#${row.source_channel_id}> (ワード: \`${row.keyword}\`)\n`;
             }
 
             await interaction.editReply({ content: listText });
